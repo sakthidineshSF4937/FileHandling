@@ -1,0 +1,309 @@
+*{
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.header{
+    background-color: black;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+}
+.menulinks{
+ 
+}
+.menulinks ul{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+}
+.menulinks ul li{
+    list-style: none;
+    color: white;
+    padding-right: 30px;
+}
+
+.menulinks ul li a{
+    text-decoration: none;
+    color: white;
+}
+.bloglogo{
+
+        width: 165px;
+        height: 37px;
+    } 
+
+.buttonGroup{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+    .button{
+        padding: 10px 20px;
+        border-radius: 5px;
+    }
+    .button1{
+        background-color: #1a1a1a;
+       color: white;
+       border: 2px white;
+    }
+    .button2{
+        background-color: #0073dc;
+        color: white;
+
+    }
+    .button3{
+        padding: 12px 24px;
+        width: 250px;
+        background-color: #0073dc;
+        color: white;
+        height: 49px;
+    }
+    .container{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+    .box1{
+        border: 1px solid;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+.Join{
+    background-color: #162E9C;
+}
+.Joinbox{
+  display: flex;
+  justify-content: space-around;
+  padding-top: 50px;
+  align-items: center;
+}
+#joinus{
+    color: #FFFFFF;
+    font-family: "Open Sans", Sans-serif;
+    font-size: 40px;
+    font-weight: 700;
+}
+#joinus-para{
+    color: #FFFFFF;
+    font-family: "Open Sans", Sans-serif;
+
+}
+.meetingbox{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  
+    margin: 0 10%;
+    margin-top: 5%;
+}
+.meetingDescription{
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+.titleheader{
+    color: #1E293B;
+    font-family: "Open Sans", Sans-serif;
+    font-size: 40px;
+    font-weight: 700;
+    line-height: 56px;
+}
+.subtitledescription{
+    color: #475569;
+    font-family: "Open Sans", Sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 36px;   
+}
+.values{
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr ;
+}
+
+.syncfusionvalues{
+    margin: 0 10%;
+}
+.badge{
+    background-color: #C9E0FF;
+    color: #000000;
+    padding: 3px 15px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    border-radius: 18px;
+    line-height: 24px;
+    width: max-content;
+    text-align: center;
+    margin-bottom: 15px;
+    margin-top: 10px;
+}
+.cardcontainer{
+ 
+    /* width: 346px;
+    height: 550px;
+    background-color: #FFFFFF;
+    border-radius: 24px 24px 24px 24px;
+    box-shadow: 0px 0px 0px 0px #1C3C3C;
+    box-shadow: 0px 0px 4px 4px rgba(0, 0, 0, 0.22); */
+
+}
+.jobtitle{
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 40px;
+    color: #1E293B;
+    margin-top: 8px;
+   
+}
+.jobtitledescription{
+    font-size: 20px;
+    line-height: 22px;
+    font-weight: 400;
+    letter-spacing: 0.16px;
+    color: #000;
+    margin: 10px 0px;
+    margin-top: 20%;
+   
+}
+.jobtitledescription1{
+    font-size: 20px;
+    line-height: 22px;
+    font-weight: 400;
+    letter-spacing: 0.16px;
+    color: #000;
+}
+.info{
+    color: #0f172a;
+    font-size: 16px;
+    font-weight: 700;
+    margin-top: 3px;
+    margin-bottom: 7px;
+    margin-left: 15px;
+    margin-right: 15px;
+    line-height: 20px;
+    width: 80%;
+}
+.card{
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    width: 346px;
+    height: 550px;
+    background-color: #FFFFFF;
+    border-radius: 24px 24px 24px 24px;
+    box-shadow: 0px 0px 0px 0px #1C3C3C;
+    box-shadow: 0px 0px 4px 4px rgba(0, 0, 0, 0.22);
+    margin-top: 20px;
+
+
+}
+.cardcontainer{
+    padding: 0 10%;
+}
+.interview-detail{
+   
+   display: flex;
+   flex-direction: column;
+   align-items:flex-start;
+}
+.interview-item{
+
+    margin-top: 10%;
+}
+.additional{
+    border-radius: 5px;
+}
+.cardcontainer{
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    
+}
+.openings{
+ background-image: url('/Images/Current-openings-background.svg');    
+}
+
+.jobcard{
+
+    width: 300px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    text-align: left;
+}
+.jobcard h2{
+    margin: 5px 0;
+    font-size: 20px;
+    color: #333;
+}
+.jobcard p{
+    margin: 5px 0;
+    font-size: 16px;
+    color: #666;
+}
+
+.jobcard a{
+    display: inline-block;
+    margin-top: 20px;
+    padding: 10px 15px;
+    font-size: 14px;
+    color: #fff;
+    text-decoration: none;
+    background-color: #007bff;
+    border-radius: 5px;
+    transition: background-color 0.3s;
+}
+.jobcontainer{
+
+     display: grid;
+     grid-template-columns: 1fr 1fr;
+
+
+}
+.jobcontainer1{
+
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+
+}
+.country{
+    background-color: #fff;
+    border: 1px solid #CBD5E1;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 25px;
+    transition: background-color 0.3s ease;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 30px;
+    
+}
+.openings{
+    margin-top :20px; 
+   
+}
+.jobcontainer{
+    padding: 0 10%;
+}
+.jobcontainer1{
+    padding: 0 10%;
+}
+.life{
+    margin: 0 10%;
+}
+
+.BenefitCard{
+    width: 220px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-top: 10%;
+}
+.BenefitBox{
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    padding: 0 10%;
+    
+}
