@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Medicine Shop</title>
+    <link rel="stylesheet" href="css/style.css">
+    
+</head>
+<body>
+    <div id="box">
+        <div class="sign">
+            <h1 onclick="signIn()" id="signInButton">Sign In</h1>
+            <h1 onclick="signUp()" id="signUpButton">Sign Up</h1>
+        </div>
+        <div id="signUp">
+            <form action="" onsubmit="signUpSubmit(event)">
+            <input type="text" id="name" placeholder="Name" required>
+            <input type="email" id="email" placeholder="Email" required>
+            <input type="password" id="password" placeholder="Password" required>
+            <input type="password" id="cpassword" placeholder="Confirm Password" required>
+            <input type="text" id="phone" placeholder="Phone Number" required>
+            <input type="submit" value="Submit" class="sub">
+            </form>
+        </div>
+        <div id="signIn">
+            <form action="" onsubmit="signInSubmit(event)">
+            <input type="email" id="email1" placeholder="Email">
+            <input type="password" id="password2" placeholder="Password">
+            <input type="submit" value="Submit" class="sub">
+        </form>
+        </div>
+    </div>
+    <div id="menu">
+        <ol>
+            <li onclick="home()">Home</li>
+            <li onclick="showmedicine()">Medicine Details</li>
+            <li onclick="purchase()">Purchase</li>
+            <li onclick="topup()">Top up</li>
+            <li onclick="order()">Order History</li>
+            <li onclick="logout()">Log Out</li>
+        </ol>
+    </div>
+    <div id="homePage">
+        <h1 id="welcome"></h1>
+    </div>
+    <div id="medicinePage">
+        <span id="medicineAddButton"><button onclick="addMedicine()" id="addmedicine">Add Medicine</button> </span>
+        <table id="medicineTable">
+           <tr>
+                <th>Medicine Id</th>
+                <th>Medicine Name</th>
+                <th>Medicine Price</th>
+                <th>Quantity</th>
+                <th>Expiry Date</th>
+                <th>Action</th>
+           </tr>
+        </table>
+    </div>
+    <div id="purchasePage">
+        <table id="purchaseTable">
+            <tr>
+                <th>Medicine Id</th>
+                 <th>Medicine Name</th>
+                 <th>Medicine Price</th>
+                 <th>Quantity</th>
+                 <th>Expiry Date</th>
+                 <th>Action</th>
+            </tr>
+         </table>
+    </div>
+ 
+    <div id="topUpPage">
+        <h1 id="currentBalance"></h1>
+        <span id="amountInput"><input type="number" placeholder="Enter the Amount " id="amount" required>
+        <button onclick="deposit()" id="deposit">Deposit</button></span>
+    </div>
+    <div id="orderPage">
+        <table id="orderTable">
+            <tr>
+                 <th>Order ID</th>
+                 <th>User ID</th>
+                 <th>Medicine ID</th>
+                 <th>Quantity</th>
+                 <th>TotalPice</th>
+                 <th>OrderDate</th>
+                 <th>Orderstatus</th>
+                 <th>Action</th>
+            </tr>
+         </table>
+    </div>
+    <div id="addEditMedicineForm">
+        <h1>Add/ Edit Medicine Details</h1>
+        <input type="text" id="medicineName" placeholder="medicine name">
+        <input type="text" id="medicineCount" placeholder="medicine count">
+        <input type="text" id="medicinePrice" placeholder="medicine price">
+        <input type="date" id="expiryDate" placeholder="expiry Date">
+        <button onclick="addEditMedicine()">submit</button>
+    </div>
+    <script type="text/javascript" src="Typescript/index.js"></script>
+</body>
+</html>

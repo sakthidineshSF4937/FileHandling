@@ -1,0 +1,229 @@
+
+
+.sign{
+    display: flex;
+    justify-content: space-evenly;
+    background-color: darkred;
+    color: white;
+}
+.sign h1:nth-child(1){
+    border-radius: 10px;
+    padding: 5px;
+    background-color: black;
+
+}
+.sign h1:nth-child(2){
+    border-radius: 10px;
+    padding: 5px;
+    background-color: black;
+}
+
+#box{
+    width: 50%;
+    margin: 20vh auto;
+}
+#signup{
+    padding: 20px;
+    border: 2px solid black;
+    border-radius: 20px;
+    width: 60%;
+    margin: auto;
+
+}
+#signIn{
+    padding: 20px;
+    border: 2px solid green;
+    border-radius: 20px;
+    width: 60%;
+    margin: auto;
+    display: none;
+}
+
+
+#signIn input,#signup input{
+    width: 100%;
+    margin: 2% auto;
+    line-height: 2rem;
+    font-size: 1.2rem;
+    text-indent: 3%;
+    border-radius: 10px;
+    border: 2px solid blue;
+    box-shadow: 2px 2px 2px gray;
+}
+#menu{
+    display:none;
+}
+
+#menu ol{
+    display: flex;
+    list-style-type: none;
+    width:80%;
+    margin: auto;
+    justify-content: space-evenly;
+    text-transform: uppercase;
+    /* font-weight: bold; */
+    color:white;
+    background-color: black;
+    padding: 10px;
+    border-radius: 10px;
+}
+#menu ol li{
+    padding: 10px;
+    border-radius: 10px;
+}
+#menu ol li:hover{
+    background-color:lightskyblue ;
+    color: black;
+    
+}
+
+.sub{
+    width: 100%;
+    margin:2% auto;
+    line-height: 2rem;
+    font-size: 1.2rem;
+    border-radius: 10px;
+    background-color: orange;
+    color: white;
+    border: 2px solid orangered;
+    box-shadow: 2px 2px 2px gray;
+}
+
+#welcome,#balance,#currentBalance,#currentBalance1{
+    font-size: 3rem;
+    text-align: center;
+  
+}
+
+#additem,#deposit,#deposit1{
+    background-color: green;
+    color: white;
+    border: none;
+    height: 2rem; width: 6rem;
+    border-radius: 10px;
+}
+
+#cancelbtn{
+    background-color: red;
+    color: white;
+    border: none;
+    height: 2rem; width: 6rem;
+    border-radius: 10px;
+}
+
+#amountInput,#itemAddButton{
+    display: flex;
+    justify-content: center;
+    padding-bottom: 1rem;
+}
+#top input{
+    width: 40%;
+    margin:2% auto;
+    line-height: 4rem;
+    font-size: 2rem;
+    text-indent: 3%;
+    border-radius: 10px;
+    border: 2px solid blue;
+    box-shadow: 2px 2px 2px gray;
+    display: block;
+}
+#top button{
+    display: block;
+    margin: auto;
+    line-height: 2rem;
+    font-size: 1.2rem;
+    border-radius: 10px;
+    background-color: green;
+    color: white;
+    border: 2px solid green;
+    box-shadow: 2px 2px 2px gray;
+}
+#top{
+    display: none;
+}
+#medButton{
+    display: block;
+    width: 10%;
+    border: none;
+    padding: 5px;
+    font-size: 1.2rem;
+    border-radius: 10px;
+    color: white;
+    margin:5vh auto ;
+    background-color: green; 
+}
+#itemPage,#purchasePage,#walletRechargePage,#orderHistoryPage,#walletBalancePage{
+    margin-top: 10vh;
+    margin-bottom:5vh;
+    display: none;
+}
+#itemTable,#purchaseTable,#orderTable{
+    margin: auto;
+    border: 2px solid gray;
+    border-collapse: collapse;
+}
+#itemTable td,#itemTable th,#purchaseTable td,#purchaseTable th,#orderTable td,#orderTable th{
+    text-align: center;
+    border: 2px solid gray;
+    padding: 5px;
+}
+#itemTable td button,#purchaseTable td button{
+    border: none;
+    padding: 5px;
+    font-size: 1.2rem;
+    border-radius: 10px;
+    color: white;
+    margin: 0px 5px;
+}
+#tb2 td button{
+    background-color: red;
+}
+#itemTable td button:nth-child(1){
+    background-color: blue;
+    
+}
+#itemTable td button{
+    background-color: green;
+    
+}
+#itemTable td button:nth-child(2){
+    background-color: red;
+  
+}
+
+#addEditProductForm{
+    margin-top: 5vh;
+    display: none;
+    width:40%;
+    margin: auto;
+    border:2px solid black;
+    padding: 10px;
+    border-radius: 10px;
+}
+#addEditProductForm input{
+    width: 50%;
+    margin:2% auto;
+    line-height: 2rem;
+    font-size: 1.5rem;
+    text-indent: 3%;
+    border-radius: 10px;
+    border: 2px solid blue;
+    box-shadow: 2px 2px 2px gray;
+    display: block;
+}
+#addEditProductForm h1{
+    text-align: center;
+}
+#addEditProductForm button{
+    display: block;
+    width: 50%;
+    border: none;
+    padding: 5px;
+    font-size: 1.2rem;
+    border-radius: 10px;
+    color: white;
+    margin: auto;
+    background-color: green;
+    /* margin: 0px 5px; */
+
+}

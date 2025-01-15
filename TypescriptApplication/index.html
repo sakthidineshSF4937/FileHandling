@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="./CSS/style.css">
+</head>
+<body>
+    <div id="box">
+        <div class="sign">
+            <h1 onclick="signIn()" id="signInButton">Sign In</h1>
+            <h1 onclick="signUp()" id="signUpButton">Sign Up</h1>
+        </div>
+        <div id="signup">
+            <form action="" onsubmit="signUpSubmit(event)">
+             <input type="text" id="name" placeholder="Name" required>
+             <input type="email" id="email" placeholder="Email" required>
+             <input type="password" id="password" placeholder="Password" required>
+             <input type="password" id="cpassword" placeholder="Confirm Password" required>
+             <input type="text" id="city" placeholder="City" required>
+             <input type="text" id="phone" placeholder="PhoneNumber" required>
+             <input type="submit"  value="submit" class="sub" required>
+            </form>
+        </div>
+        <div id="signIn">
+            <form action="" onsubmit="signInSubmit(event)">
+                <input type="email" id="email1" placeholder="Email" required>
+                <input type="password" id="password2" placeholder="Password" required>
+                <input type="submit"  value="submit" class="sub" required>                
+            </form>
+        </div>
+
+         
+    </div>
+
+
+    <div id="menu">
+        <ol>
+            <li onclick="Home()">Home</li>
+            <li onclick="showitems()">Items</li>
+            <li onclick="Purchase()">Purchase</li>
+            <li onclick="CancelOrder()">Cancel</li>
+            <li onclick="order()">History</li>
+            <li onclick="showBalance()">Balance</li>
+            <li onclick="WalletRecharge()">Recharge</li>
+            <li onclick="Logout()">LogOut</li>
+        </ol>
+    </div>
+    <div id="homepage">
+        <h1 id="welcome"></h1>
+    </div>
+     <div id="itemPage">
+        <span id="itemAddButton"> <button onclick="addProduct()" id="additem">Add Order</button></span>
+         <table id="itemTable">
+            <tr>
+                <th>ProductID</th>
+                <th>ProductName</th>
+                <th>Stock</th>
+                <th>Price</th>
+                <th>Shipping Duration</th>
+                <th>action</th>
+            </tr>
+         </table>
+     </div>
+     <div id="purchasePage">
+        <table id="purchaseTable">
+            <tr>
+                <th>ProductID</th>
+                <th>Stock</th>
+                <th>Price/th>
+                <th>Shipping Duration</th>
+                <th>Action</th>
+            </tr>
+        </table>
+
+     </div>
+     <div id="walletBalancePage">
+        <h1 id="currentBalance1"></h1>
+    </div>
+     
+     <div id="walletRechargePage">
+        <h1 id="currentBalance"></h1>
+        <span id="amountInput"><input type="number" placeholder="Enter the Amount " id="amount" required>
+        <button onclick="deposit()" id="deposit">Deposit</button></span>
+    </div>
+    <div id="orderHistoryPage">
+        <table id="orderTable">
+            <tr>
+                 <th>Order ID</th>
+                 <th>CustomerID</th>
+                 <th>ProductID</th>
+                 <th>TotalPrice</th>
+                 <th>PurchaseDate</th>
+                 <th>Qauntity</th>
+                 <th>Orderstatus</th>
+                 <th>Action</th>
+            </tr>
+         </table>
+    </div>
+    <div id="addEditProductForm">
+        <h1>Add/Edit Product Details</h1>
+        <input type="text" id="ProductName"  placeholder="productname">
+        <input type="text" id="Stock"     placeholder="stock">
+        <input type="text" id="Price"            placeholder="price">
+        <input type="text" id="ShippingDuration" placeholder="ShippingDuration">
+        <button onclick="addEditProduct()">submit</button>
+    </div>
+    <script src="./TypeScript/main.js"></script>
+</body>
+</html>
