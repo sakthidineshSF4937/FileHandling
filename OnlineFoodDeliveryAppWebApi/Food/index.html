@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="./CSS/style.css">
+</head>
+<body>
+    <div id="box">
+        <div class="sign">
+            <h1 onclick="signIn()" id="si">Sign In</h1>
+            <h1 onclick="signUp()" id="su">Sign Up</h1>
+        </div>
+        <div id="signup">
+            <form action="" onsubmit="signUpSubmit(event)">
+            <input type="text" id="name" placeholder="Name" required>
+            <input type="text" id="fatherName" placeholder="FatherName" required>
+            <input type="text" id="gender" placeholder="gender" required>
+            <input type="text" id="phone" placeholder="phone">
+            <input type="date" id="dob" placeholder="DateOfBirth">
+            <input type="email" id="email" placeholder="email">
+            <input type="password" id="password" placeholder="Password" required>
+            <input type="password" id="cpassword" placeholder="Confirm Password" required>
+            <!-- <input type="text" id="phone" placeholder="Phone Number" required> -->
+            <input type="submit" value="Submit" class="sub">
+            </form>
+        </div>
+        <div id="signin">
+            <form action="" onsubmit="signInSubmit(event)">
+            <input type="email" id="email1" placeholder="Email">
+            <input type="password" id="password2" placeholder="Password">
+            <input type="submit" value="Submit" class="sub">
+        </form>
+        </div>
+    </div>
+    <script src="./typescript/index.js"></script>
+</body>
+</html>
