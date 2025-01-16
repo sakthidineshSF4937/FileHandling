@@ -1,0 +1,142 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submit your application</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+   <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Submit your application</h1>
+        <h2>for .NET Developer (Fresher)</h2>
+        <div class="steps">
+            <div class="step active">
+                <span>1</span>
+                <p>Personal Information</p>
+            </div>
+            <div class="step">
+                <span>2</span>
+                <p>Education and Experience</p>
+            </div>
+            <div class="step">
+                <span>3</span>
+                <p>Upload Resume</p>
+            </div>
+            <div class="step">
+                <span>4</span>
+                <p>Referral Information</p>
+            </div>
+        </div>
+        <h3>Personal Information</h3>
+        <form id="form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Name as per ID proof *</label>
+                    <input type="text" id="name" >
+                    <span class="error" id="namespan" style="visibility: hidden;">Special characters and numbers are not allowed</span>
+                </div>
+                <div class="form-group">
+                    <label for="father-name">Father's Name *</label>
+                    <input type="text" id="fathername" name="father-name" >
+                    <span class="error" id="fathernamespan" style="visibility: hidden;">Special characters and numbers are not allowed</span>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="email">Email *</label>
+                    <input type="email" id="email" name="email" value="asdfasdf">
+                    <span class="error" id="emailspan" style="visibility: hidden;">Please enter a valid email address</span>
+                </div>
+                <div class="form-group">
+                    <label for="dob">Date of Birth *</label>
+                    <input type="date" id="date" name="dob" placeholder="DD/MM/YYYY">
+                    <span class="required" id="datespan" style="visibility: hidden;">Required</span>
+                </div>
+                <div class="form-group">
+                    <label for="mobile">Mobile No *</label>
+                    <input type="text" id="phone" name="mobile" value="1324">
+                    <span class="error" id="phonespan" style="visibility: hidden;">Enter valid Mobile No.</span>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="current-address">Current Address *</label>
+                    <input type="text" id="current-address" name="current-address" value="Adambakkam">
+                    <span id="presentaddressspan"></span>
+                </div>
+                <div class="form-group">
+                    <label for="address-line-2">Address line 2</label>
+                    <input type="text" id="address-line-2" name="address-line-2">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="city">City</label>
+                    <input type="text" id="city" name="city" value="Chennai">
+                </div>
+                <div class="form-group">
+                    <label for="state">State</label>
+                    <select id="state" name="state">
+                        <option value="Tamil Nadu" selected>Tamil Nadu</option>
+                    </select>
+                    <span id="statespan"></span>
+                </div>
+                <div class="form-group">
+                    <label for="zip">Zip Code</label>
+                    <input type="text" id="zip" name="zip" >
+                    <span id="presentpincodespan" style="visibility: hidden;"></span>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="permanent-address">
+                    <input type="checkbox" id="checkbox" name="permanent-address"> Same as Current Address
+                </label>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="permanent-address-line-1">Permanent Address *</label>
+                    <input type="text" id="permanent-address-line-1" name="permanent-address-line-1">
+                    <span class="error" id="permanentaddressspan" style="visibility: hidden;">Address is required</span>
+                </div>
+                <div class="form-group">
+                    <label for="permanent-address-line-2">Address line 2</label>
+                    <input type="text" id="permanent-address-line-2" name="permanent-address-line-2">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="permanent-city">City</label>
+                    <input type="text" id="permanent-city" name="permanent-city">
+                    <span class="error" style="visibility: hidden;">City is required</span>
+                </div>
+                <div class="form-group">
+                    <label for="permanent-state">State</label>
+                    <select id="permanentStateDropdown" name="permanent-state">
+                        <option value="Tamil Nadu" selected>Tamil Nadu</option>
+                    </select>
+                    <span class="error" id="permanentstate"></span>
+                </div>
+                <div class="form-group">
+                    <label for="permanent-zip">Zip Code</label>
+                    <input type="text" id="permanent-zip" name="permanent-zip">
+                    <span class="error" style="visibility: hidden;">Zip code is required</span>
+                </div>
+            </div>
+            <div class="form-group upload-photo">
+                <label for="profile-photo">Upload Profile Photo *</label>
+                <input type="file" id="profile-photo" name="profile-photo" accept="image/jpeg, image/png">
+                <button type="button">UPLOAD PHOTO</button>
+            </div>
+            <div class="form-group">
+                <span>Please upload a photo of yourself. Your face should be clearly visible. Make sure the image size does not exceed 500KB.</span>
+            </div>
+            <div class="submit-button">
+                <button type="submit">Submit</button>
+            </div>
+        </form>
+
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
