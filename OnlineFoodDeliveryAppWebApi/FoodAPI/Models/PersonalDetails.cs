@@ -5,14 +5,6 @@ using System.Threading.Tasks;
 
 namespace FoodAPI.Models
 {
- 
-  // public  enum Gender{
-  //   select,
-  //  Male,
-  // Female
-  // ,Transgender,
-  // }
- 
     public class PersonalDetails
     {
         public string Name{get;set;}

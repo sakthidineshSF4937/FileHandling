@@ -28,7 +28,7 @@ namespace FoodAPI.Controller
     [HttpPut("{orderID}")]
     public IActionResult UpdateOrders(int orderID,[FromBody] OrderDetails order)
         {
-            var orderOld=AppData.orders.Find(order=>order.OrderID==orderID && order.OrderStatus==OrderStatus.orderd);
+            var orderOld=AppData.orders.Find(order=>order.OrderID==orderID && order.OrderStatus=="ordered");
             orderOld.OrderStatus=order.OrderStatus;
             foreach(var item in AppData.items)
             {

@@ -22,6 +22,7 @@
             <input type="email" id="email" placeholder="email">
             <input type="password" id="password" placeholder="Password" required>
             <input type="password" id="cpassword" placeholder="Confirm Password" required>
+            <input type="text" id="location" placeholder="Location" required>
             <!-- <input type="text" id="phone" placeholder="Phone Number" required> -->
             <input type="submit" value="Submit" class="sub">
             </form>
@@ -33,6 +34,80 @@
             <input type="submit" value="Submit" class="sub">
         </form>
         </div>
+    </div>
+    <div id="menu">
+        <ol>
+            <li onclick="home()">Home</li>
+            <li onclick="stock()">Stock</li>
+            <li onclick="purchase()">Purchase</li>
+            <li onclick="cart()">Cart</li>
+            <li onclick="bookingHistory()">Booking History</li>
+            <li onclick="recharge()">Recharge </li>
+            <li onclick="show()">show balance</li>
+            <li onclick="Logout()">Log Out</li>
+        </ol>
+    </div>
+    <div id="home">
+        <h1 class="wel1"><img id="imgTag"></h1>
+        <h1 id="welcome"></h1>
+    </div>
+    <div id="stock">
+        <button onclick="addGrocery()" class="medButton">Add Items</button>
+        <table id="tb">      
+                <thead>
+                  <tr>
+                        <th>FoodID</th>
+                        <th>FoodName</th>
+                        <th>Price Per Quantity</th>
+                        <th>Quantity Available</th>
+                   </tr>
+                </thead>
+                <tbody id="tbody1">
+
+                </tbody>
+           
+        </table>
+    </div>
+    <div id="purchase">
+        <div id="product-cont">
+        </div>
+    </div>
+    <div id="cart">
+        <table id="tb2">
+            <tr>
+                <thead>
+                    <th>Name</th>
+                    <th>Count</th>
+                    <th>Price</th>
+                    <th>Remove</th>
+                </thead>
+                <tbody id="tbody3">
+
+                </tbody>
+            </tr>
+         </table>
+         <button onclick="buy()" class="medButton">Buy</button>
+    </div>
+    <div id="history">
+
+        
+    </div>
+    <div id="top">
+        <h5 id="curBalance"></h5>
+        <input type="number" placeholder="Enter the Amount " id="amount" required>
+        <button onclick="deposit()">Deposit</button>
+    </div>
+    <div id="show">
+        <h5 id="balance"></h5>
+    </div>
+    
+    <div id="form1">
+        <h1>Food Details</h1>
+        <input type="text" id="itemName" placeholder="itemName"/>
+        <input type="number" id="itemCount" placeholder="itemCount"/>
+        <input type="number" id="itemPrice" placeholder="itemPrice"/>
+
+        <button onclick="addProductTo()">submit</button>
     </div>
     <script src="./typescript/index.js"></script>
 </body>

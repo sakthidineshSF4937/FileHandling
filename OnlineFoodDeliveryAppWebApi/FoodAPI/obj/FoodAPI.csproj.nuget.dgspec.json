@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj": {}
+    "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj": {}
   },
   "projects": {
-    "D:\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj": {
+    "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj",
+        "projectUniqueName": "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj",
         "projectName": "FoodAPI",
-        "projectPath": "D:\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj",
+        "projectPath": "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj",
         "packagesPath": "C:\\Users\\SakthiDineshPownraj\\.nuget\\packages\\",
-        "outputPath": "D:\\OnlineFoodDeliveryAppWebApi\\foodapi\\obj\\",
+        "outputPath": "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\SakthiDineshPownraj\\AppData\\Roaming\\NuGet\\NuGet.Config"

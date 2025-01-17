@@ -1077,11 +1077,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "d:\\OnlineFoodDeliveryAppWebApi\\FoodAPI\\FoodAPI.csproj",
+      "projectUniqueName": "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj",
       "projectName": "FoodAPI",
-      "projectPath": "d:\\OnlineFoodDeliveryAppWebApi\\FoodAPI\\FoodAPI.csproj",
+      "projectPath": "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\FoodAPI.csproj",
       "packagesPath": "C:\\Users\\SakthiDineshPownraj\\.nuget\\packages\\",
-      "outputPath": "d:\\OnlineFoodDeliveryAppWebApi\\FoodAPI\\obj\\",
+      "outputPath": "D:\\FinalProject\\webapi-main\\webapi-main\\OnlineFoodDeliveryAppWebApi\\foodapi\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\SakthiDineshPownraj\\AppData\\Roaming\\NuGet\\NuGet.Config"

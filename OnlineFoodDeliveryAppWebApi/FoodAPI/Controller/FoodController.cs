@@ -14,13 +14,12 @@ namespace FoodAPI.Controller
       
 
       [HttpGet]
-
       public IActionResult GetFoods(){
+        System.Console.WriteLine("hello from getfoods");
         return Ok(AppData.foods);
       }
 
       [HttpGet("{foodID}")]
-
       public IActionResult GetIndividualFoods(int foodID)
       {
         var food=AppData.foods.FirstOrDefault(food=>food.FoodID==foodID);
@@ -35,7 +34,7 @@ namespace FoodAPI.Controller
       [HttpPost]
       public IActionResult AddFood([FromBody] FoodDetails food)
       {
-          food.FoodID=AppData.foods.Count+1;
+          food.FoodID=2000+AppData.foods.Count;
             AppData.foods.Add(food);
             return Ok();
 
