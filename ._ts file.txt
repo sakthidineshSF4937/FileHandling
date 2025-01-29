@@ -812,3 +812,265 @@ updateTemplateLength(length){
           console.log(this.templateIds.length)
       this.isToolbar = false;
     }
+
+
+
+
+
+   countTemplate(){
+      console.log("hello world")
+      sessionStorage.setItem("templateLength",this.templateIds.length.toString())
+    }
+
+
+    deleteTemplate() {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const toastObj = this.$nuxt.$store.state.toastObj;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+      
+      if (!selectedRecords.length) {
+        this.$nuxt.$spinner.show(false);
+        return;
+      }
+    
+      const docID: string = selectedRecords[0].documentId;
+      const documentName = selectedRecords[0].messageTitle;
+      const ids: any[] = [];
+    
+      selectedRecords.forEach(item => {
+        if (item && item.documentId) {
+          ids.push(item.documentId);
+        }
+      });
+    //this.$nuxt.$emit("updateTemplateLength",this.templateIds.length);
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+        documentName: documentName,
+      });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+        documentName: documentName,
+      });
+    
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+
+        for (let index = 0; index < this.templateIds.length; index++) {
+          const templateId = this.templateIds[index];
+           this.count++
+          this.$nuxt.$api.template.deleteTemplate(templateId).then(data => {
+            console.log(`Deleted: ${templateId}`);
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+          })
+            .catch(error => {
+              console.log(`Not Deleted: ${templateId}`);
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            })
+            .finally(() => {
+            this.$nuxt.$spinner.show(false);
+          });
+          }
+          this.$nuxt.$emit("updateTemplateLength",this.templateIds.length);
+          console.log(this.templateIds.length)
+      this.isToolbar = false;
+    }
+
+
+<template>
+ <ejs-dropdownbutton v-if="!showConfirmDialog"
+    class="bs-template-merge"
+    id="merge_button"
+    :items="mergeOptions"
+    :content="mergeAndUse"
+    :open="setPopoverPosition"
+    @select="mergeOptionsSelect"
+  ></ejs-dropdownbutton>  
+  <ejs-dialog v-else
+      ref="modalDialog"
+      :isModal="true"
+      width="450px"
+      >
+      <div>
+        <div class="flex items-start pb-4 pt-4 pl-3 pr-8">
+          <div class="warning-gradient-bg"></div>
+          <div class="text-content-style">{{ $nuxt.$t('templates.confirmPermanentDelete') }}</div>
+          <!-- <div>{{Count}}</div> -->
+           <div>{{ templateLength}}</div>
+        </div>
+        <div class="dialog-footer">
+        <button type="button" class="e-control e-btn e-lib e-flat" v-on:click="onCancelDelete">{{ data.customPermission.dialogCancel }}</button>
+        <button type="button" class="e-control e-btn e-lib e-danger e-flat" v-on:click="onConfirmDelete">{{ data.customPermission.dialogConfirm }}</button>
+      </div>
+      </div>
+    </ejs-dialog>
+
+</template>
+
+
+<script lang="ts">
+import { Component, Prop, Vue } from "vue-property-decorator";
+import ConfirmDeleteDialog from "../webhooks/confirm-delete-dialog.vue";
+import dailogtext from "../../../ClientApp/locales/en.json";
+import TemplateComponent from "../../../ClientApp/pages/templates/_"
+@Component
+({
+  components:{
+    ConfirmDeleteDialog,TemplateComponent
+  }
+})
+@Component
+export default class MergeTemplateDropDown extends Vue {
+  data=dailogtext;
+  // Count=TemplateComponent.prototype.count;
+  // templatelength=[...TemplateComponent]
+//     templatelength=templateIds.prototype.templateIds.length;
+  // get templateLength(){
+  //   return templateIds.prototype.templateIds.length
+  // }
+   selectdocumentcount=0;
+   templateLength:number=0;
+showConfirmDialog:boolean = false;
+
+created(){
+  // this.$nuxt.$on("updateTemplateLength",this.updateTemplateLength)
+  const storedTemplateLength=sessionStorage.getItem("templateLength")
+  if(storedTemplateLength){
+    this.templateLength=parseInt(storedTemplateLength,10)
+  }
+}
+
+// updateTemplateLength(length){
+//   console.log("helloworld")
+//   console.log(length)
+//  this.templateLength=length;
+// }
+  mergeOptions = [
+    { text: 'Create document', id: 'mergeDoc' },
+    { text: 'Create bulk link', id: 'mergeLink' },
+    {text:'Delete',id:'mergedelete'}
+  ];
+
+  mergeAndUse = 'Merge & Use';
+
+  mergeOptionsSelect (args) {
+    if (args.item.id === 'mergeDoc') {
+      this.$nuxt.$emit('mergeTemplate', 'document');
+    }
+    else if(args.item.id ==='mergedelete'){
+      // this.$nuxt.$emit("updateTemplateLength")
+      this.$nuxt.$emit('countTemplate')
+      this.showConfirmDialog=true;
+      console.log('mergedelete')
+    }
+    else {
+      this.$nuxt.$emit('mergeTemplate', 'bulklink');
+    }
+  }
+  onConfirmDelete(){
+    console.log("confirmed delete");
+    this.$nuxt.$emit('deleteTemplate', 'document');
+    this.showConfirmDialog=false;
+    sessionStorage.removeItem("templateLength")
+  }
+  onCancelDelete(){
+    console.log("canceled delete");
+    this.showConfirmDialog=false;
+    sessionStorage.removeItem("templateLength")
+  }
+  setPopoverPosition () {
+    const dropdown = document.querySelector('#merge_button') as HTMLElement;
+    const popover = document.querySelector('#merge_button-popup') as HTMLElement;
+    if (dropdown && popover) {
+      popover.style.left = dropdown.getBoundingClientRect().left + "px";
+    }
+  }
+}
+</script>
+
+<style>
+#merge_button {
+  border: solid 1px #0F43B3;
+  color: #ffffff;
+  padding: 4px 12px;
+  background-color: #0565ff;
+  border-radius: 4px;
+  width: 148px;
+  height: 32px;
+}
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100%;
+  background-color: rgba(45, 55, 72, 0.4);
+  opacity: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2147483647; /* Ensure it's above other content */
+} 
+
+.dialog-box {
+ max-width: 470px; /* Same width as specified for the dialog */
+}
+.centered-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color: #fff;
+  border-radius: 8px;
+}
+
+.dialog-header {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 10px;
+}
+ /* .overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(45, 55, 72, 0.4);
+  opacity: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2147483647; /* Ensure it's above other content */
+/* }  */ 
+#merge_button:hover {
+  background-color: #2e7eff;
+}
+
+.bs-template-merge:before {
+  content: '\e3b4';
+  font-family: Bold Sign;
+  vertical-align: middle;
+  font-weight: 500;
+  padding-right: 10px;
+}
+
+#merge_button span.e-btn-icon.e-icons.e-icon-right.e-caret {
+  display: inline-block;
+  font-weight: 500;
+  color: #ffffff;
+  margin: 0;
+  padding-left: 7px;
+}
+
+#merge_button-popup ul {
+  min-width: 148px;
+}
+</style>
+
