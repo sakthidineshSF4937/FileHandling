@@ -26,6 +26,90 @@ Merge template dropdown.vue file
       </div>
       <div class="dialog-footer">
         <button type="button" class="e-control e-btn e-lib e-flat" v-on:click="onCancelDelete">{{ data.customPermission.dialogCancel }}</button>
+
+
+<template>
+ <ejs-dropdownbutton v-if="!showConfirmDialog"
+    class="bs-template-merge"
+    id="merge_button"
+    :items="mergeOptions"
+    :content="mergeAndUse"
+    :open="setPopoverPosition"
+    @select="mergeOptionsSelect"
+  ></ejs-dropdownbutton>  
+
+  <!-- <div class="e-control e-dialog e-lib confirm-delete-template-dialog e-dlg-modal e-popup e-popup-open centered-dialog" role="dialog" style="max-height: 348px; z-index: 2147483647; width: 470px;" aria-describedby="_dialog-content" aria-modal="true" tabindex="-1" >
+    <div class="e-dlg-content" id="_dialog-content">
+      <div class="dialog-header" style="display: flex;justify-content: space-between;">
+        <div class="warning-gradient-bg"></div>
+        <div class="text-content-style">
+        <div>{{data.customPermission.dialogConfirmText }}</div> 
+       <div> {{ count }}  </div>
+        <div>{{ data.customPermission.dialogConfirmSubText }}</div>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" class="e-control e-btn e-lib e-flat" v-on:click="onCancelDelete">{{ data.customPermission.dialogCancel }}</button>
+        <button type="button" class="e-control e-btn e-lib e-danger e-flat" v-on:click="onConfirmDelete">{{ data.customPermission.dialogConfirm }}</button>
+      </div>
+    </div>
+  </div> -->
+  <ejs-dialog v-else
+      ref="modalDialog"
+      :isModal="true"
+      width="450px"
+      >
+      <div>
+        <div class="flex items-start pb-4 pt-4 pl-3 pr-8">
+          <div class="warning-gradient-bg"></div>
+          <div class="text-content-style">{{ $nuxt.$t('templates.confirmPermanentDelete') }}</div>
+          <!-- <div>{{Count}}</div> -->
+           <div>{{ templateLength}}</div>
+        </div>
+        <div class="dialog-footer">
+        <button type="button" class="e-control e-btn e-lib e-flat" v-on:click="onCancelDelete">{{ data.customPermission.dialogCancel }}</button>
+        <button type="button" class="e-control e-btn e-lib e-danger e-flat" v-on:click="onConfirmDelete">{{ data.customPermission.dialogConfirm }}</button>
+      </div>
+      </div>
+    </ejs-dialog>
+
+</template>
+
+
+<script lang="ts">
+import { Component, Prop, Vue } from "vue-property-decorator";
+import ConfirmDeleteDialog from "../webhooks/confirm-delete-dialog.vue";
+import dailogtext from "../../../ClientApp/locales/en.json";
+import TemplateComponent from "../../../ClientApp/pages/templates/_"
+@Component
+({
+  components:{
+    ConfirmDeleteDialog,TemplateComponent
+  }
+})
+@Component
+export default class MergeTemplateDropDown extends Vue {
+  data=dailogtext;
+  // Count=TemplateComponent.prototype.count;
+  // templatelength=[...TemplateComponent]
+//     templatelength=templateIds.prototype.templateIds.length;
+  // get templateLength(){
+  //   return templateIds.prototype.templateIds.length
+  // }
+   selectdocumentcount=0;
+   templateLength:number=0;
+showConfirmDialog:boolean = false;
+
+updateTemplateLength(length){
+  console.log("helloworld")
+  console.log(length)
+ this.templateLength=length;
+}
+  mergeOptions = [
+    { text: 'Create document', id: 'mergeDoc' },
+    { text: 'Create bulk link', id: 'mergeLink' },
+    {text:'Delete',id:'mergedelete'}
+  ];
         <button type="button" class="e-control e-btn e-lib e-danger e-flat" v-on:click="onConfirmDelete">{{ data.customPermission.dialogConfirm }}</button>
       </div>
     </div>
@@ -595,3 +679,136 @@ export default class TemplateComponent extends Vue {
       this.isToolbar = false;
     }
 }
+<template>
+ <ejs-dropdownbutton v-if="!showConfirmDialog"
+    class="bs-template-merge"
+    id="merge_button"
+    :items="mergeOptions"
+    :content="mergeAndUse"
+    :open="setPopoverPosition"
+    @select="mergeOptionsSelect"
+  ></ejs-dropdownbutton>  
+
+  <!-- <div class="e-control e-dialog e-lib confirm-delete-template-dialog e-dlg-modal e-popup e-popup-open centered-dialog" role="dialog" style="max-height: 348px; z-index: 2147483647; width: 470px;" aria-describedby="_dialog-content" aria-modal="true" tabindex="-1" >
+    <div class="e-dlg-content" id="_dialog-content">
+      <div class="dialog-header" style="display: flex;justify-content: space-between;">
+        <div class="warning-gradient-bg"></div>
+        <div class="text-content-style">
+        <div>{{data.customPermission.dialogConfirmText }}</div> 
+       <div> {{ count }}  </div>
+        <div>{{ data.customPermission.dialogConfirmSubText }}</div>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" class="e-control e-btn e-lib e-flat" v-on:click="onCancelDelete">{{ data.customPermission.dialogCancel }}</button>
+        <button type="button" class="e-control e-btn e-lib e-danger e-flat" v-on:click="onConfirmDelete">{{ data.customPermission.dialogConfirm }}</button>
+      </div>
+    </div>
+  </div> -->
+  <ejs-dialog v-else
+      ref="modalDialog"
+      :isModal="true"
+      width="450px"
+      >
+      <div>
+        <div class="flex items-start pb-4 pt-4 pl-3 pr-8">
+          <div class="warning-gradient-bg"></div>
+          <div class="text-content-style">{{ $nuxt.$t('templates.confirmPermanentDelete') }}</div>
+          <!-- <div>{{Count}}</div> -->
+           <div>{{ templateLength}}</div>
+        </div>
+        <div class="dialog-footer">
+        <button type="button" class="e-control e-btn e-lib e-flat" v-on:click="onCancelDelete">{{ data.customPermission.dialogCancel }}</button>
+        <button type="button" class="e-control e-btn e-lib e-danger e-flat" v-on:click="onConfirmDelete">{{ data.customPermission.dialogConfirm }}</button>
+      </div>
+      </div>
+    </ejs-dialog>
+
+</template>
+
+
+<script lang="ts">
+import { Component, Prop, Vue } from "vue-property-decorator";
+import ConfirmDeleteDialog from "../webhooks/confirm-delete-dialog.vue";
+import dailogtext from "../../../ClientApp/locales/en.json";
+import TemplateComponent from "../../../ClientApp/pages/templates/_"
+@Component
+({
+  components:{
+    ConfirmDeleteDialog,TemplateComponent
+  }
+})
+@Component
+export default class MergeTemplateDropDown extends Vue {
+  data=dailogtext;
+  // Count=TemplateComponent.prototype.count;
+  // templatelength=[...TemplateComponent]
+//     templatelength=templateIds.prototype.templateIds.length;
+  // get templateLength(){
+  //   return templateIds.prototype.templateIds.length
+  // }
+   selectdocumentcount=0;
+   templateLength:number=0;
+showConfirmDialog:boolean = false;
+
+updateTemplateLength(length){
+  console.log("helloworld")
+  console.log(length)
+ this.templateLength=length;
+}
+  mergeOptions = [
+    { text: 'Create document', id: 'mergeDoc' },
+    { text: 'Create bulk link', id: 'mergeLink' },
+    {text:'Delete',id:'mergedelete'}
+  ];    deleteTemplate() {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const toastObj = this.$nuxt.$store.state.toastObj;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+      
+      if (!selectedRecords.length) {
+        this.$nuxt.$spinner.show(false);
+        return;
+      }
+    
+      const docID: string = selectedRecords[0].documentId;
+      const documentName = selectedRecords[0].messageTitle;
+      const ids: any[] = [];
+    
+      selectedRecords.forEach(item => {
+        if (item && item.documentId) {
+          ids.push(item.documentId);
+        }
+      });
+    
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+        documentName: documentName,
+      });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+        documentName: documentName,
+      });
+    
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+
+        for (let index = 0; index < this.templateIds.length; index++) {
+          const templateId = this.templateIds[index];
+           this.count++
+          this.$nuxt.$api.template.deleteTemplate(templateId).then(data => {
+            console.log(`Deleted: ${templateId}`);
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+          })
+            .catch(error => {
+              console.log(`Not Deleted: ${templateId}`);
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            })
+            .finally(() => {
+            this.$nuxt.$spinner.show(false);
+          });
+          }
+          this.$nuxt.$emit("updateTemplateLength",this.templateIds.length);
+          console.log(this.templateIds.length)
+      this.isToolbar = false;
+    }
