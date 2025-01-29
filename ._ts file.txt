@@ -179,6 +179,86 @@ showConfirmDialog:boolean = false;
 }
 </style>
 
+
+
+    deleteTemplate() {
+      for (let index = 0; index < this.templateIds.length; index++) {
+        const templateId = this.templateIds[index];
+        this.$nuxt.$api.template.deleteTemplate(templateId).then(data => {
+          console.log(`Deleted: ${templateId}`);
+        })
+          .catch(error => {
+            console.log(`Not Deleted: ${templateId}`);
+          });
+        }
+
 background-color: rgba(45, 55, 72, 0.4);
-opacity: 1;
+opacity: 1; deleteYesBtn () {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const toastObj = this.$nuxt.$store.state.toastObj;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+      const docID: string = selectedRecords[0].documentId;
+      const documentName = selectedRecords[0].messageTitle;
+      const path = '';
+      const options = {};
+      const ids: any[] = [];
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+        documentName: documentName,
+      });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+        documentName: documentName,
+      });
+      selectedRecords.forEach(item => {
+        item && item.documentId ? ids.push(item.documentId) : null;
+      });
+      if (isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+        this.$api.template
+          .deleteDraftTemplate(ids)
+          .then(() => {
+            this.selectedDocumentsCount = 0;
+            this.checkState = false;
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          });
+      } else {
+        this.$api.template
+          .deleteTemplate(docID)
+          .then(() => {
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          });
+      }
+
+      this.isToolbar = false;
+    }
+
+    deleteNoBtn () {
+      this.clearSelection();
+      this.$data.deleteDialogVisible = false;
+    }
+
+    hideSelectedItems (selectedRecords) {
+      if (!selectedRecords) {
+        return;
+      }
+      const gridData = this.$refs.grid1.getCurrentViewRecords() as any;
+      const gridRows = this.$refs.grid1.getRows();
+      const rowElements = selectedRecords.map(x => gridData.findIndex(y => y.documentId === x.documentId)).map(x => gridRows[x]);
+      rowElements.forEach((x: HTMLElement) => (x ? (x.style.display = 'none') : null));
+    }
 
