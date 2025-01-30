@@ -1,1 +1,166 @@
+    deleteYesBtn () {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const toastObj = this.$nuxt.$store.state.toastObj;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+      const docID: string = selectedRecords[0].documentId;
+      const documentName = selectedRecords[0].messageTitle;
+      const path = '';
+      const options = {};
+      const ids: any[] = [];
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+        documentName: documentName,
+      });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+        documentName: documentName,
+      });
+      selectedRecords.forEach(item => {
+        item && item.documentId ? ids.push(item.documentId) : null;
+      });
+      if (isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+        this.$api.template
+          .deleteDraftTemplate(ids)
+          .then(() => {
+            this.selectedDocumentsCount = 0;
+            this.checkState = false;
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          });
+      } else {
+        this.$api.template
+          .deleteTemplate(docID)
+          .then(() => {
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            this.$nuxt.$spinner.show(false);
+          });
+      }
 
+      this.isToolbar = false;
+    }
+
+
+    deleteTemplate() {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const toastObj = this.$nuxt.$store.state.toastObj;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+      if (!selectedRecords.length) {
+        this.$nuxt.$spinner.show(false);
+        return;
+      }
+    
+      const docID: string = selectedRecords[0].documentId;
+      const documentName = selectedRecords[0].messageTitle;
+      const ids: any[] = [];
+    
+      selectedRecords.forEach(item => {
+        if (item && item.documentId) {
+          ids.push(item.documentId);
+        }
+      });
+    this.$nuxt.$emit("updateTemplateLength",this.templateIds.length);
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+        documentName: documentName,
+      });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+        documentName: documentName,
+      });
+      console.log("Vuex in delete method",this.$store.getters.getTemplateLength)
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+
+        // for (let index = 0; index < this.templateIds.length; index++) {
+        //   const templateId = this.templateIds[index];
+        //    this.count++
+        //   this.$nuxt.$api.template.deleteTemplate(templateId).then(data => {
+        //     this.hideSelectedItems(selectedRecords);
+        //     this.scheduleGridRefresh();
+        //     this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+        //   })
+        //     .catch(error => {
+        //     this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+        //     })
+        //     .finally(() => {
+        //     this.$nuxt.$spinner.show(false);
+        //   });
+        //   }
+        const deletePromises = this.templateIds.map(templateId => {
+          return this.$nuxt.$api.template.deleteTemplate(templateId)
+            .then(() => {
+              this.hideSelectedItems(selectedRecords);
+               this.scheduleGridRefresh();
+              this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            })
+            .catch(() => {
+              this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            });
+        });
+      
+        // Wait for all deletions to complete before hiding the spinner
+        Promise.all(deletePromises).finally(() => {
+          // this.hideSelectedItems(selectedRecords);
+          this.scheduleGridRefresh();
+          this.$nuxt.$spinner.show(false);
+        });
+      this.isToolbar = false;
+    }
+    // deleteTemplate() {
+    //   this.$nuxt.$spinner.show(true);
+    //   const gridObj = this.$refs.grid1.ej2Instances;
+    //   const toastObj = this.$nuxt.$store.state.toastObj;
+    //   const selectedRecords: any[] = gridObj.getSelectedRecords();
+    
+    //   if (!selectedRecords.length) {
+    //     this.$nuxt.$spinner.show(false);
+    //     return;
+    //   }
+    
+    //   const ids: string[] = selectedRecords.map(item => item.documentId);
+    //   const documentName = selectedRecords[0].messageTitle;
+    
+    //   const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+    //     documentName: documentName,
+    //   });
+    //   const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+    //     documentName: documentName,
+    //   });
+    
+    //   console.log("Vuex in delete method", this.$store.getters.getTemplateLength);
+    //   this.onNewNotificationReceived();
+    //   this.$data.deleteDialogVisible = false;
+    
+    //   // Track all delete promises
+    //   const deletePromises = this.templateIds.map(templateId => {
+    //     return this.$nuxt.$api.template.deleteTemplate(templateId)
+    //       .then(() => {
+    //         this.$nuxt.$spinner.show(true);
+    //         this.hideSelectedItems(selectedRecords);
+    //         this.scheduleGridRefresh();
+    //         this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+    //       })
+    //       .catch(() => {
+    //         this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+    //       });
+    //   });
+    
+    //   // Wait for all deletions to complete before hiding the spinner
+    //   Promise.allSettled(deletePromises).finally(() => {
+    //     this.$nuxt.$spinner.show(false);
+    //   });
+    
+    //   this.isToolbar = false;
+    // }
