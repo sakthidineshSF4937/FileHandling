@@ -1,0 +1,91 @@
+  [HttpDelete]
+    [Authorize(Policy = TemplateAuthorizationOption.CanDeleteTemplate)]
+    public async Task<ActionResult> DeleteTemplates([Guid(ErrorMessage = ValidationMessages.ValidDocumentId)][Required(ErrorMessage = ValidationMessages.Required)]string[] templateId)
+    {
+      foreach(var template in templateId){
+      if (string.IsNullOrEmpty(template))
+      {
+        return this.BadRequest("Failure");
+      }
+
+      string baseUrl = this.requestDetailsService.HostedDomain;
+
+      dynamic[] procParams = new dynamic[] { templateId };
+
+      // isAccessTid is set to false. since, we need to delete both the shared and original template types.
+      var accessRightsList = await this.templateService.GetTemplatesByDocumentId(this.userDataService, template, false).ConfigureAwait(false);
+      if (accessRightsList.Count > 0)
+      {
+        var clearContainerTask = this.documentService.ClearContainers(template, this.userDataService.OrganizationId);
+        await this.templateService.DeleteTemplatesByDocumentIdAsync(this.userDataService.OrganizationId, template).ConfigureAwait(false);
+        await clearContainerTask.ConfigureAwait(false);
+        await this.documentService.NotifyDeletedTemplateUsers(accessRightsList, new Uri(baseUrl), this.hubContext, this.teamManagement).ConfigureAwait(false);
+        _ = this.templateService.LogDeleteUserActivityAsync(accessRightsList, this.orgActivityService).ConfigureAwait(false);
+        return this.Content("Success");
+      }
+      }
+      return this.BadRequest("Failure");
+    }
+  deleteYesBtn() {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+    
+      if (!selectedRecords.length) {
+        this.$nuxt.$spinner.show(false);
+        return;
+      }
+    
+      const documentName = selectedRecords[0].messageTitle;
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', { documentName });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', { documentName });
+    
+      const ids: string[] = selectedRecords.map(item => item.documentId);
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+    
+      // Handle draft template deletion separately
+      if (isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+        this.$api.template
+          .deleteDraftTemplate(ids)
+          .then(() => {
+            this.selectedDocumentsCount = 0;
+            this.checkState = false;
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+          })
+          .finally(() => {
+            this.$nuxt.$spinner.show(false);
+          });
+      } else {
+        console.log("merge delete");
+        // Use the merged delete API call
+        this.$api.template.mergeDeleteTemplate(ids)
+          .then(() => {
+            this.selectedDocumentsCount = 0;
+            this.checkState = false;
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+          })
+          .finally(() => {
+            this.$nuxt.$spinner.show(false);
+          });
+      }
+    
+      this.isToolbar = false;
+    }
+      mergeDeleteTemplate(templateId: string[]) { 
+        console.log("merge delete")
+        return $axios.$delete('Template/DeleteTemplates/', {
+          params: { templateId },  
+          paramsSerializer: params =>paramsSerializer(params),
+        });
+      },
