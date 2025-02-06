@@ -1,0 +1,36 @@
+describe('count of Templates before deletion', () => {
+    it('templatecount', () => {
+      cy.visit('http://localhost:63043/templates/mytemplates/');
+      cy.wait('@gettemplates').then((xhr) => {
+        // cy.log('Response Body:', JSON.stringify(xhr.response.body));
+        // cy.log('Template count:', xhr.response.body.count);
+        const originalCount = xhr.response.body.count;
+        cy.log('Template count Before Deletion:', originalCount);
+        expect(originalCount).to.be.a('number');
+        expect(originalCount).to.be.at.least(0);
+        cy.wrap(originalCount).as('originalCount');
+      });
+    });
+  });
+
+
+describe('count of Templates before deletion', () => {
+    it('templatecount', () => {
+      cy.visit('http://localhost:63043/templates/mytemplates/');
+
+      cy.wait('@gettemplates').then((xhr) => {
+        // Log the full response body to inspect its structure
+        // cy.log('Response Body:', JSON.stringify(xhr.response.body));
+        // // Log the count if it exists
+        // cy.log('Template count:', xhr.response.body.count);
+        const updatedCount = xhr.response.body.count;
+        // Log the updated count after deletion
+        cy.log('After Deletion Template count:', updatedCount);
+        // Assert that the updated count is a number and at least 0
+        expect(updatedCount).to.be.a('number');
+        expect(updatedCount).to.be.at.least(0);
+        // Compare the updated count with the original count
+        cy.get('@originalCount').should('be.greaterThan', updatedCount);
+      });
+    });
+  });
