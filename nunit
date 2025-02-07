@@ -184,3 +184,60 @@
             return userManagementMock;
 
         }
+   /// <summary>
+    /// Delete multiple templates for the given template ID.
+    /// </summary>
+    /// <param name="templateId">Array of template document ID.</param>
+    /// <returns>Returns action result.</returns>
+    /// Policy is consumed internally.
+    [HttpDelete]
+    [Authorize]
+    [PolicyValidation(PolicyStatus = PolicyStatus.Internally)]
+    public async Task<IActionResult> DeleteTemplates([GuidArray(ErrorMessage = ValidationMessages.ValidDocumentId)][Required(ErrorMessage = ValidationMessages.Required)]string[] templateId)
+    {
+      try
+      {
+        if (templateId == null || templateId.Contains(string.Empty) || templateId?.Length == 0)
+        {
+          return this.BadRequest("Failure");
+        }
+
+        var tuple = await PermissionAuthorizationHandler.GetResourceOwnerAllowedGroups(this.userDataService, this.HttpContext, Permissions.TemplateResources, this.cacheService, this.teamManagement, this.apiRequestService).ConfigureAwait(false);
+
+        Dictionary<string, Task<bool?>> deleteTasks = new Dictionary<string, Task<bool?>>();
+        var permissionList = await new AccessRightsReader(this.HttpContext, null, this.apiRequestService).GetPermissionsListAsync(this.userDataService, this.cacheService).ConfigureAwait(false);
+
+        var groupData = await this.teamManagement.GetTeamListAsync(this.userDataService).ConfigureAwait(false);
+
+        this.HttpContext.Items.TryAdd(DocumentDetailsReader.TeamListCache, groupData);
+
+        foreach (var id in templateId)
+        {
+          deleteTasks.Add(id, this.templateService.DeleteTemplatesItem(id, this.User, this.authorizationService, this.documentService, this.userDataService, permissionList, tuple.Item1));
+        }
+
+        await Task.WhenAll(deleteTasks.Select(v => v.Value)).ConfigureAwait(false);
+        string[] successId = deleteTasks.Where(x => x.Value.Result == true).Select(x => x.Key).ToArray();
+
+        if (deleteTasks.Any(x => x.Value.Result == null))
+        {
+          return this.Forbid();
+        }
+
+        return deleteTasks.All(x => x.Value.Result == true) ? this.Ok("Success") : (IActionResult)this.BadRequest(ExceptionMessages.DeleteTemplateDrafts);
+      }
+      catch (CosmosException ex) when (ex.StatusCode.ToString().ToUpperInvariant() == this.documentService.DocumentClientNotFoundException)
+      {
+        return this.BadRequest("Failure");
+      }
+    }
+
+        [Category("DeleteDraftsTemplate")]
+        [Test]
+        public async Task DeleteDraftsTemplateEmptyIdException()
+        {
+            var templateService = new TemplateService(this.elasticClient, this.cacheService, teamManagement, contextAccessor, mapper, apiRequestServiceMock.Object, this.documentContentServiceMock.Object);
+            var templateController = new TemplateController(userDataService, userManagement, templateService, documentService, authorizationService, accessRightsServices, notificationHub, null, mapper, teamManagement, requestDetailsService, this.cacheService, apiRequestServiceMock.Object);
+            var result = await templateController.DeleteDraftsTemplate(new string[0]).ConfigureAwait(false);
+            ClassicAssert.IsInstanceOf<BadRequestObjectResult>(result);
+        }
