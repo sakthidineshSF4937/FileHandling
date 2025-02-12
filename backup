@@ -529,3 +529,6 @@ namespace BoldSign.ApiManagement.Service
         }
     }
 }
+x-burst-limit-limit = 1m
+x-burst-limit-remaining = create=29, update=50,delete = 50, list=50
+x-burst-limit-reset create = 2025-02-11T16:35:37.0075842Z, delete= 2025-02-11T16:35:37.0075842Z, list = 2025-02-11T16:35:37.0075842Z, update= 2025-02-11T16:35:37.0075842Z
