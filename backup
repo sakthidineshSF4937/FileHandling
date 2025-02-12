@@ -1,0 +1,420 @@
+   public async Task Invoke(HttpContext context)
+        {
+            try
+            {
+                this.options.DisableRateLimitHeaders = true;
+                var identity = await this.ResolveIdentityAsync(context).ConfigureAwait(false);
+                await this.ApplyRulesAsync(context, identity, true).ConfigureAwait(false);
+
+                // Apply shared hourly rules
+                var hourlyId = identity.ClientId.Split('_');
+                await this.ApplyRulesAsync(
+                        context,
+                        new ClientRequestIdentity
+                        {
+                            ClientId = hourlyId[0],
+                            ClientIp = identity.ClientIp,
+                            Path = "*",
+                            HttpVerb = "*",
+                        },
+                        false).ConfigureAwait(false);
+
+                foreach (var header in this.responseHeaders.GetItems())
+                {
+                    context.Response.Headers[header.Key] = header.Value;
+                }
+
+                await this.next(context).ConfigureAwait(false);
+            }
+            catch (RateLimitReachedException)
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await context.Response.WriteAsync("Rate limit exceeded").ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("An error occurred while processing your request").ConfigureAwait(false);
+            }
+        }
+
+       private async Task<ClientRequestIdentity> ResolveIdentityAsync(HttpContext context)
+        {
+            string clientId = "anon";
+            if (this.config.ClientResolvers?.Any() == true)
+            {
+                var clientIdTasks = this.config.ClientResolvers.Select(resolver => resolver.ResolveClientAsync(context));
+                var clientIds = await Task.WhenAll(clientIdTasks).ConfigureAwait(false);
+                clientId = clientIds.FirstOrDefault(id => !string.IsNullOrEmpty(id)) ?? "anon";
+            }
+
+            var methodEndpoint = RateLimitHelper.GetMethodTypeFromAttribute(context);
+
+            return new ClientRequestIdentity
+            {
+                ClientId = clientId,
+                ClientIp = "anon",
+                Path = methodEndpoint,
+                HttpVerb = context.Request.Method.ToLowerInvariant(),
+            };
+        }
+ [Authorize]
+    public class IdentityResolveContributor : IClientResolveContributor
+    {
+        /// <inheritdoc/>
+        [Authorize]
+        public Task<string> ResolveClientAsync(HttpContext httpContext)
+        {
+            var userDataService = new UserDataService(httpContext);
+            var subId = userDataService.SubscriptionId;
+            if (userDataService.OAuthAppOrgId.IsValidGuid() && userDataService.OAuthAppSubId.IsValidGuid())
+            {
+                Console.WriteLine(
+                    $"OAuth-Billing: Set OAuth App creator subId - {userDataService.OAuthAppSubId} for the user" +
+                    $" with subId - {userDataService.SubscriptionId} in order to charge creator.");
+                subId = userDataService.OAuthAppSubId;
+            }
+
+            if (userDataService.ClientId.IsSalesForceClientId())
+            {
+                httpContext.AddEnvironment(false);
+            }
+
+            var clientId = GetClientId(userDataService.Environment == ApplicationEnvironment.Test, subId);
+
+            // Determine the method-specific key for 1-minute limits
+            var methodType = RateLimitHelper.GetMethodTypeFromAttribute(httpContext);
+
+            var methodSpecificKey = $"{clientId}_{methodType}";
+
+            return Task.FromResult(methodSpecificKey);
+        }
+  public UserDataService(HttpContext context)
+        {
+            this.context = context ?? throw new ArgumentNullException(nameof(context));
+
+            var jwtClaim = this.context.GetClaim(JwtUserDataService.EnvironmentClaim);
+            var apiKey = this.context.Request.Headers[AppAuthenticationSchemes.APIRequestHeaderName].ToString();
+
+            if (!string.IsNullOrEmpty(apiKey) || !string.IsNullOrEmpty(jwtClaim))
+            {
+                this.UserData = new JwtUserDataService(this.context);
+            }
+            else
+            {
+                this.UserData = new CookieUserDataService(this.context);
+            }
+        }
+
+        public static string GetClaim(this HttpContext httpContext, string claimName)
+        {
+            return httpContext?.User?.Claims?.FirstOrDefault(c => c.Type == claimName)?.Value;
+        }
+
+    public static class RateLimitHelper
+    {
+        /// <summary>
+        /// Get the burst rate limit method type.
+        /// </summary>
+        /// <param name="httpContext">The httpcontext.</param>
+        /// <returns>A string.</returns>
+        public static string GetMethodTypeFromAttribute(HttpContext httpContext)
+        {
+            var endpoint = httpContext.GetEndpoint();
+            var attribute = endpoint?.Metadata.GetMetadata<RateLimitMethodAttribute>();
+            return attribute?.MethodType.ToString().ToLowerInvariant();
+        }
+
+      private async Task ApplyRulesAsync(HttpContext context, ClientRequestIdentity identity, bool isBurstLimit)
+        {
+            var rules = await this.GetMatchingRulesAsync(identity, context.RequestAborted).ConfigureAwait(false);
+            if (rules.Any())
+            {
+                foreach (var rule in rules)
+                {
+                    await this.ApplyRateLimit(context, identity, rule, isBurstLimit).ConfigureAwait(false);
+                }
+            }
+        }
+      private string BuildCounterKey(ClientRequestIdentity requestIdentity, RateLimitRule rule)
+        {
+            var key = this.counterKeyBuilder.Build(requestIdentity, rule);
+
+            if (this.options.EnableEndpointRateLimiting && this.config.EndpointCounterKeyBuilder != null)
+            {
+                key += this.config.EndpointCounterKeyBuilder.Build(requestIdentity, rule);
+            }
+
+        private void AddHeader(string key, string value)
+        {
+            this.responseHeaders.Add(key, value);
+        }
+/// <typeparam name="TKey">The type of keys in the dictionary.</typeparam>
+/// <typeparam name="TValue">The type of values in the dictionary.</typeparam>
+public class ImmutableOrderedDictionary<TKey, TValue>
+{
+    private ImmutableList<KeyValuePair<TKey, TValue>> items = ImmutableList<KeyValuePair<TKey, TValue>>.Empty;
+
+    /// <summary>
+    /// Adds a key-value pair to the dictionary.
+    /// </summary>
+    /// <param name="key">The key of the element to add.</param>
+    /// <param name="value">The value of the element to add.</param>
+    public void Add(TKey key, TValue value)
+    {
+        ImmutableInterlocked.Update(ref this.items, (list) => list.Add(new KeyValuePair<TKey, TValue>(key, value)));
+    }
+
+  public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            var httpContext = context.HttpContext;
+            HandleEnvironmentClaim(context);
+            var userDataService = new UserDataService(httpContext);
+            var mode = userDataService.Environment == ApplicationEnvironment.Test ? Mode.Test : Mode.Live;
+            var endpoint = RateLimitHelper.GetMethodTypeFromAttribute(httpContext);
+            var cacheKey = GetCacheKey(userDataService, mode);
+            var key = cacheKey + "_" + endpoint;
+            var cacheExists = await this.ExistRateLimitCacheAsync(key).ConfigureAwait(false);
+
+            if (cacheExists)
+            {
+                var limit = await this.clientPolicyStore.GetAsync($"{this.options.ClientPolicyPrefix}_{key}").ConfigureAwait(false);
+                await this.clientPolicyStore.RemoveAsync($"{this.options.ClientPolicyPrefix}_{key}").ConfigureAwait(false);
+                cacheExists = false;
+                if (limit?.Rules != null)
+                {
+                    var oneMinuteRules = limit.Rules.Where(x => x.Period == OneMinutePeriod).ToList();
+
+                    if (!oneMinuteRules.Any())
+                    {
+                        await this.clientPolicyStore.RemoveAsync($"{this.options.ClientPolicyPrefix}_{key}").ConfigureAwait(false);
+                        cacheExists = false;
+                    }
+                }
+            }
+
+            if (!cacheExists)
+            {
+                List<RateLimitRules> rules = await this.FetchRulesAsync(userDataService.SubscriptionId, mode).ConfigureAwait(false);
+                if (rules != null && rules.Any())
+                {
+                    var rule = rules.FirstOrDefault();
+                    var ratelimitRules = new List<RateLimitRules>
+                    {
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Read).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Read,
+                        },
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Write).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Write,
+                        },
+
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Create).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Create,
+                        },
+
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Delete).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Delete,
+                        },
+
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetHourlyRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1h",
+                            SubscriptionId = rule.SubscriptionId,
+                        },
+                    };
+
+                    await this.ProcessRulesAsync(ratelimitRules, cacheKey).ConfigureAwait(false);
+                }
+                else
+                {
+                    List<RateLimitRule> defaultRules = this.GetDefaultRulesForCurrentEnvironment(userDataService);
+                    await this.UpdateRateLimitRules(cacheKey, defaultRules).ConfigureAwait(false);
+                }
+            }
+
+            await next().ConfigureAw
+   public class RateLimitAttribute : IAsyncActionFilter, IRateLimitAttribute
+    {
+        private const string OneMinutePeriod = "1m";
+        private readonly ClientRateLimitOptions options;
+        private readonly IClientPolicyStore clientPolicyStore;
+        private readonly DataBaseContext dataBaseContext;
+        private readonly IMapper mapper;
+        private readonly IRateLimitingService rateLimitingService;
+
+
+        private static void HandleEnvironmentClaim(ActionExecutingContext context)
+        {
+            var sendForSignFromTemplate =
+                context.ActionArguments.SingleOrDefault(p => p.Value is SendForSignFromTemplate);
+            var sendForSign =
+                context.ActionArguments.SingleOrDefault(p => p.Value is SendForSign);
+            var userDataService = new UserDataService(context.HttpContext);
+
+            if (userDataService.ClientId.IsSalesForceClientId())
+            {
+                context.HttpContext.AddEnvironment(false);
+            }
+
+            if (sendForSignFromTemplate.Value is SendForSignFromTemplate { IsSandbox: not null } sendForSignFromTemplateRequest)
+            {
+                context.HttpContext.AddEnvironment(sendForSignFromTemplateRequest.IsSandbox.Value);
+            }
+            else if (sendForSign.Value is SendForSign { IsSandbox: not null } sendForSignRequest)
+            {
+                context.HttpContext.AddEnvironment(sendForSignRequest.IsSandbox.Value);
+            }
+        }
+
+
+ public class RateLimitAttribute : IAsyncActionFilter, IRateLimitAttribute
+    {
+        private const string OneMinutePeriod = "1m";
+        private readonly ClientRateLimitOptions options;
+        private readonly IClientPolicyStore clientPolicyStore;
+        private readonly DataBaseContext dataBaseContext;
+        private readonly IMapper mapper;
+        private readonly IRateLimitingService rateLimitingService;
+
+  public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            var httpContext = context.HttpContext;
+            HandleEnvironmentClaim(context);
+            var userDataService = new UserDataService(httpContext);
+            var mode = userDataService.Environment == ApplicationEnvironment.Test ? Mode.Test : Mode.Live;
+            var endpoint = RateLimitHelper.GetMethodTypeFromAttribute(httpContext);
+            var cacheKey = GetCacheKey(userDataService, mode);
+            var key = cacheKey + "_" + endpoint;
+            var cacheExists = await this.ExistRateLimitCacheAsync(key).ConfigureAwait(false);
+
+            if (cacheExists)
+            {
+                var limit = await this.clientPolicyStore.GetAsync($"{this.options.ClientPolicyPrefix}_{key}").ConfigureAwait(false);
+                await this.clientPolicyStore.RemoveAsync($"{this.options.ClientPolicyPrefix}_{key}").ConfigureAwait(false);
+                cacheExists = false;
+                if (limit?.Rules != null)
+                {
+                    var oneMinuteRules = limit.Rules.Where(x => x.Period == OneMinutePeriod).ToList();
+
+                    if (!oneMinuteRules.Any())
+                    {
+                        await this.clientPolicyStore.RemoveAsync($"{this.options.ClientPolicyPrefix}_{key}").ConfigureAwait(false);
+                        cacheExists = false;
+                    }
+                }
+            }
+
+            if (!cacheExists)
+            {
+                List<RateLimitRules> rules = await this.FetchRulesAsync(userDataService.SubscriptionId, mode).ConfigureAwait(false);
+                if (rules != null && rules.Any())
+                {
+                    var rule = rules.FirstOrDefault();
+                    var ratelimitRules = new List<RateLimitRules>
+                    {
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Read).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Read,
+                        },
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Write).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Write,
+                        },
+
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Create).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Create,
+                        },
+
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetBurstRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode, BurstRateLimitMethod.Delete).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1m",
+                            SubscriptionId = rule.SubscriptionId,
+                            BurstMethod = BurstRateLimitMethod.Delete,
+                        },
+
+                        new RateLimitRules
+                        {
+                            Endpoint = "*",
+                            Id = rule.Id,
+                            IsWhiteList = rule.IsWhiteList,
+                            Limit = await this.rateLimitingService.GetHourlyRateLimitAsync(userDataService.SubscriptionId.ToGuid(), mode).ConfigureAwait(false),
+                            Mode = rule.Mode,
+                            Period = "1h",
+                            SubscriptionId = rule.SubscriptionId,
+                        },
+                    };
+
+                    await this.ProcessRulesAsync(ratelimitRules, cacheKey).ConfigureAwait(false);
+                }
+                else
+                {
+                    List<RateLimitRule> defaultRules = this.GetDefaultRulesForCurrentEnvironment(userDataService);
+                    await this.UpdateRateLimitRules(cacheKey, defaultRules).ConfigureAwait(false);
+                }
+            }
+
+            await next().ConfigureAw
