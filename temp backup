@@ -1,0 +1,85 @@
+ var accessRightsList = await this.templateService.GetTemplatesByDocumentId(this.userDataService, templateId, false).ConfigureAwait(false);
+      if (accessRightsList.Count > 0)
+      {
+        var clearContainerTask = this.documentService.ClearContainers(templateId, this.userDataService.OrganizationId);
+        await this.templateService.DeleteTemplatesByDocumentIdAsync(this.userDataService.OrganizationId, templateId).ConfigureAwait(false);
+        await clearContainerTask.ConfigureAwait(false);
+        await this.documentService.NotifyDeletedTemplateUsers(accessRightsList, new Uri(baseUrl), this.hubContext, this.teamManagement).ConfigureAwait(false);
+        _ = this.templateService.LogDeleteUserActivityAsync(accessRightsList, this.orgActivityService).ConfigureAwait(false);
+        return this.Content("Success");
+      }
+
+
+    [HttpDelete]
+    [Authorize]
+    [PolicyValidation(PolicyStatus = PolicyStatus.Internally)]
+    public async Task<IActionResult> DeleteTemplates([GuidArray(ErrorMessage = ValidationMessages.ValidDocumentId)][Required(ErrorMessage = ValidationMessages.Required)]string[] templateId)
+    {
+      try
+      {
+        if (templateId == null || templateId.Contains(string.Empty) || templateId.Length == 0)
+        {
+            return this.BadRequest("Failure");
+        }
+
+        bool allSucceeded = await this.templateService.DeleteTemplatesItemsAsync(templateId, this.User, this.authorizationService, this.documentService, this.userDataService, this.HttpContext);
+
+        return allSucceeded ? this.Ok("Success") : this.BadRequest("Failure");
+    }
+    catch (CosmosException ex) when (ex.StatusCode.ToString().ToUpperInvariant() == this.documentService.DocumentClientNotFoundException)
+    {
+        return this.BadRequest("Failure");
+    }
+    catch (Exception ex)
+    {
+        return this.StatusCode(500, $"Internal server error: {ex.Message}");
+    }
+}
+
+
+    public virtual async Task<bool> DeleteTemplatesItemsAsync(string[] templateIds, ClaimsPrincipal claims, IAuthorizationService authorizationService, IDocumentService documentService, UserDataService userDataService, HttpContext context)
+    {
+      HttpContext httpContext = context;
+      var permissionList = await new AccessRightsReader(context, null, this.apiRequestService)
+    .GetPermissionsListAsync(userDataService, this.cacheService).ConfigureAwait(false);
+      var allowedGroupsTuple = await PermissionAuthorizationHandler.GetResourceOwnerAllowedGroups(userDataService, context, Permissions.TemplateResources, this.cacheService, this.teamManagement, this.apiRequestService).ConfigureAwait(false);
+      var groupData = await this.teamManagement.GetTeamListAsync(userDataService).ConfigureAwait(false);
+      context.Items.TryAdd(DocumentDetailsReader.TeamListCache, groupData);
+      var deleteResults = new ConcurrentDictionary<string, bool>();
+      var deleteTasks = templateIds.Select(async templateId =>
+      {
+        try
+        {
+        var accessDetails = await this.GetTemplateByDocumentId(templateId, userDataService, DocumentStatus.Completed, allowedGroupsTuple.Item1).ConfigureAwait(false);
+
+        if (accessDetails == null)
+        {
+            deleteResults[templateId] = false;
+            return;
+        }
+
+        var templateDetailsReader = new TemplateDetailsReader(context, accessDetails, permissionList, this.cacheService, this.apiRequestService);
+        var role = new TemplatePolicy(context, templateDetailsReader, this.apiRequestService);
+
+        var authorizationRequirements = new List<IAuthorizationRequirement> { new TemplateDeleteRequirement() };
+
+        bool policySucceed = await documentService.GetPolicyStatus(authorizationRequirements, claims, role).ConfigureAwait(false);
+
+        if (policySucceed)
+        {
+            var result = await this.AddDeletedTemplateItemAsync(templateId, documentService, userDataService).ConfigureAwait(false);
+            deleteResults[templateId] = result;
+        }
+        else
+        {
+            deleteResults[templateId] = false;
+        }
+    }
+    catch (Exception)
+    {
+        deleteResults[templateId] = false;
+    }
+    }).ToList();
+      await Task.WhenAll(deleteTasks).ConfigureAwait(false);
+      return deleteResults.Values.All(result => result);
+}
