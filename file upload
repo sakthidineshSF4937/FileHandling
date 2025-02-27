@@ -1,0 +1,549 @@
+ public async Task<string> UploadAsync(IDocumentUploadDetails documentUploadDetails, bool isPrintSignDocument, IResponseWriter responseWriter = null, string preDefinedDocumentId = null, bool isNormalUpload = true, CancellationToken cancellationToken = default)
+    {
+      if (documentUploadDetails is null)
+      {
+        throw new ArgumentNullException(nameof(documentUploadDetails));
+      }
+            
+      var uniqueId = string.IsNullOrEmpty(preDefinedDocumentId) ? Guid.NewGuid().ToString() : preDefinedDocumentId;
+      _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.InProgress);
+      string parentId = string.IsNullOrEmpty(documentUploadDetails.ParentDocumentId) ? uniqueId : $"{documentUploadDetails.ParentDocumentId}";
+      string childId = string.IsNullOrEmpty(documentUploadDetails.ParentDocumentId) ? string.Empty : $"{uniqueId}/";
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from user data service.
+      var organizationId = documentUploadDetails.OrganizationId;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        organizationId = documentUploadDetails.OrganizationId = this.userDataService?.OrganizationId;
+      }
+
+      this.httpContextAccessor.HttpContext.Items.Add(UploadProgressOptionsKey, new UploadProgressOptions()
+      {
+        IsPrintAndSignDocument = isPrintSignDocument,
+        ChannelId = isPrintSignDocument ? parentId : documentUploadDetails.UploadChannelId,
+        ParentDocumentId = string.IsNullOrEmpty(documentUploadDetails.ParentDocumentId) ? uniqueId : documentUploadDetails.ParentDocumentId,
+        DocumentId = uniqueId,
+        DocumentClientId = documentUploadDetails.DocumentClientId,
+        IsNormalUpload = isNormalUpload,
+        ResponseWriter = (responseWriter is ResponseWriter<HttpResponse>) ? null : responseWriter,
+      });
+
+      try
+      {
+        await this.UploadAndManipulateDocument(parentId, uniqueId, childId, isPrintSignDocument, documentUploadDetails, responseWriter, cancellationToken).ConfigureAwait(false);
+        _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Completed);
+        return uniqueId;
+      }
+      catch (PdfDocumentException ex) when (ex.Message == "Can't open an encrypted document. The password is invalid.")
+      {
+        _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Failure, CommonResource.InvalidPassword);
+        await this.UpdateUploadProgress(CommonResource.InvalidPassword, true).ConfigureAwait(false);
+        this.logger.LogError(ex, CommonResource.InvalidPassword);
+#pragma warning disable CA2200 // Rethrow for catching in controller and setting 400 resoponse.
+        throw ex;
+#pragma warning restore CA2200 // Rethrow to preserve stack details.
+      }
+      catch (OperationCanceledException)
+      {
+        _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Failure, CommonResource.OperationCanceled);
+        if (isPrintSignDocument)
+        {
+          var cloudBlobContainer = await this.CloudStorage.GetContainer(parentId, organizationId).ConfigureAwait(false);
+
+          var resultSegment = cloudBlobContainer.GetBlobsByHierarchyAsync(prefix: $"{DbConstants.ScannedDocument}/", delimiter: "/")
+           .AsPages(default, BlobRequestCount);
+
+          // Enumerate therough each blob and delete.
+          await foreach (Azure.Page<BlobHierarchyItem> blobPage in resultSegment)
+          {
+            foreach (BlobHierarchyItem blobhierarchyItem in blobPage.Values)
+            {
+              if (blobhierarchyItem.IsBlob)
+              {
+                _ = cloudBlobContainer.DeleteBlobAsync(blobhierarchyItem.Blob.Name).ConfigureAwait(false);
+              }
+            }
+          }
+        }
+
+        throw;
+      }
+      catch (Exception exception)
+      {
+        if (exception is PdfException || exception is InvalidOperationException || exception is InvalidDataException)
+        {
+          string message = exception switch
+          {
+            PdfException pdfException => pdfException.Message switch
+            {
+              Constants.InvalidPassword => CommonResource.InvalidPassword,
+              Constants.Portfolio => CommonResource.UnSupportedPortfolio,
+              _ => CommonResource.CorruptedDocument
+            },
+            _ => exception.Message
+          };
+          _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Failure, message);
+          await this.UpdateUploadProgress(message, true).ConfigureAwait(false);
+          this.logger.LogError(exception, message);
+        }
+
+        throw;
+      }
+    }
+
+
+
+
+
+
+
+
+
+
+     public async Task<UploadResponse> UploadAsync(bool embeddedSend, UploadRequest request)
+    {
+      this.logger.LogInformation($"queue-upload: Received request to upload document {request?.DocumentId}");
+
+      var documents = await this.GetDocumentUploadDetailsListAsync(request).ConfigureAwait(false);
+
+      string documentVersion = "v1";
+      ITextTag sendForSign = null;
+      if (request.PayloadType != DocumentQueueBase.SendTemplate && request.PayloadType != DocumentQueueBase.MergeAndSend)
+      {
+        sendForSign = request.PayloadType == DocumentQueueBase.Template
+          ? JsonConvert.DeserializeObject<CreateTemplateRequest>(request.SendForSign)
+          : JsonConvert.DeserializeObject<SendForSign>(request.SendForSign) as ITextTag;
+      }
+      else if (request.PayloadType == DocumentQueueBase.MergeAndSend)
+      {
+        sendForSign = JsonConvert.DeserializeObject<MergeAndSendForSign>(request.SendForSign);
+      }
+
+      var orgId = this.userDataService?.OrganizationId;
+
+      string businessProfileDateFormat = null;
+      string businessProfileTimeFormat = null;
+
+      if (!string.IsNullOrEmpty(orgId))
+      {
+        var businessProfile = await this.queryCacheProvider.BusinessProfile
+          .GetBusinessProfileSettingForTemplateSendAsync(orgId.ToGuid());
+
+        businessProfileDateFormat = businessProfile?.DateFieldDateFormat;
+        businessProfileTimeFormat = businessProfile?.DateFieldTimeFormat;
+        var canEnableQualityRendering = await this.queryCacheProvider.Organization
+          .GetEnableQualityRenderingAsync(orgId.ToGuid());
+        if (canEnableQualityRendering)
+        {
+          documentVersion = "v2";
+          if (request.PayloadType == DocumentQueueBase.SendTemplate)
+          {
+            var sendTemplateDetails = JsonConvert.DeserializeObject<SendForSignFromTemplate>(request.SendForSign);
+            DocumentDetails documentDetails = await this.documentManipulatorService.GetDocumentDetailsForTemplate(sendTemplateDetails.DocumentId);
+            if (documentDetails != null)
+            {
+              documentVersion = documentDetails.DocumentVersion;
+            }
+          }
+        }
+      }
+
+      var roleFormFields = new List<RoleFormFields>();
+
+      if (request.PayloadType != DocumentQueueBase.SendTemplate && sendForSign?.UseTextTags == true)
+      {
+        if (request.PayloadType == DocumentQueueBase.MergeAndSend)
+        {
+          roleFormFields = TextTagMapper.MapTextTagsToFields(sendForSign, documents, this.documentManipulatorService, businessProfileDateFormat, businessProfileTimeFormat);
+        }
+        else
+        {
+          TextTagMapper.MapTextTagsToFields(sendForSign, documents, this.documentManipulatorService, businessProfileDateFormat, businessProfileTimeFormat);
+        }
+      }
+
+      var files = request.Files.ToList();
+
+      var pageCount = new List<int>();
+      var documentIds = new List<string>();
+      var currentUploadIndex = 0;
+      var parentDocumentId = request.DocumentId;
+      var isTaggedPdf = new List<bool>();
+
+      if (documents.Count == 0)
+      {
+        var mainContainer = await this.cloudStorage.GetContainer(parentDocumentId, orgId).ConfigureAwait(false);
+        var thumbnailContainer = await this.cloudStorage
+          .GetContainer($"{parentDocumentId}-{DbConstants.Thumbnails}", orgId).ConfigureAwait(false);
+
+        await mainContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+        await thumbnailContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+      }
+
+      void ResponseInterceptor(string message)
+      {
+        if (message.Contains(Constants.PageCount, StringComparison.InvariantCultureIgnoreCase))
+        {
+          var pageCountString = message.Split(Constants.PageCount + " : ")[1]
+            .Split('\n')[0]
+            .Trim();
+          pageCount.Add(Convert.ToInt32(pageCountString, CultureInfo.InvariantCulture));
+        }
+        else if (embeddedSend && message.Contains(Constants.Percentage, StringComparison.OrdinalIgnoreCase))
+        {
+          var percent = Convert.ToDouble(message.Split(PercentageStr)[1].Trim(), CultureInfo.InvariantCulture);
+          var uploadPercent = GetUploadPercent(percent, currentUploadIndex, files.Count);
+          Console.WriteLine($"SignalR request started {parentDocumentId}");
+          this.UpdateEmbeddedProgressAsync(parentDocumentId, uploadPercent);
+          Console.WriteLine($"SignalR request completed {parentDocumentId}");
+        }
+
+        if (message.Contains(Constants.IsTaggedPdf, StringComparison.InvariantCultureIgnoreCase))
+        {
+          var isTaggedPdfString = message.Split(Constants.IsTaggedPdf + " : ")[1]
+            .Trim();
+          isTaggedPdf.Add(Convert.ToBoolean(isTaggedPdfString, CultureInfo.InvariantCulture));
+        }
+      }
+
+      var responseWriter = new ResponseWriter<IServerStreamWriter<UploadResponse>>(null, ResponseInterceptor);
+      if (request.PayloadType == DocumentQueueBase.SendTemplate || request.PayloadType == DocumentQueueBase.MergeAndSend)
+      {
+        BlobContainerClient cloudBlobContainer = null;
+        BlobContainerClient thumbnailCloudBlobContainer = null;
+        cloudBlobContainer = await this.cloudStorage.GetContainer(parentDocumentId, orgId).ConfigureAwait(false);
+        thumbnailCloudBlobContainer = await this.cloudStorage
+          .GetContainer($"{parentDocumentId}-{DbConstants.Thumbnails}", orgId).ConfigureAwait(false);
+        await cloudBlobContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+        await thumbnailCloudBlobContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+      }
+
+      for (var i = 0; i < documents.Count; i++)
+      {
+        currentUploadIndex = i;
+        await responseWriter.WriteAsync($"index : {i}").ConfigureAwait(false);
+        if (request.PayloadType == DocumentQueueBase.SendTemplate || request.PayloadType == DocumentQueueBase.MergeAndSend)
+        {
+          documents[i].ParentDocumentId = parentDocumentId;
+        }
+        else
+        {
+          documents[i].ParentDocumentId = i > 0 ? parentDocumentId : string.Empty;
+        }
+
+        documents[i].DocumentVersion = documentVersion;
+        documents[i].OrganizationId = orgId;
+        var preDefinedDocumentId = files[i].FileDocumentId;
+
+        this.httpContext.Items.Remove(DocumentManipulatorService.UploadProgressOptionsKey);
+        if (request.PayloadType == DocumentQueueBase.Template)
+        {
+          documents[i].UploadRequestType = UploadRequestType.Template;
+        }
+
+        var documentId = await this.documentManipulatorService.UploadAsync(
+            documents[i],
+            false,
+            responseWriter,
+            preDefinedDocumentId)
+          .ConfigureAwait(false);
+        documentIds.Add(documentId);
+
+        // update final percent as 99%, since if we update as 100 then draft for embedded sending will not created yet
+        // so, update here as 99% and once the draft document is created we can update 100% from document queue.
+        var uploadPercent = GetUploadPercent(99, currentUploadIndex, files.Count);
+
+        if (embeddedSend)
+        {
+          await this.UpdateEmbeddedProgressAsync(parentDocumentId, uploadPercent).ConfigureAwait(false);
+        }
+      }
+
+      if (documents.Count > 1)
+      {
+        var documentProperties = new List<DocumentProperties>();
+
+        for (var i = 0; i < files.Count(); i++)
+        {
+          documentProperties.Add(
+            new DocumentProperties()
+            {
+              DocumentClientId = files[i].DocumentClientId,
+              DocumentId = documentIds[i],
+              DocumentName = files[i].FileName,
+              FileSize = files[i].FileSize,
+              FileType = ImageUtilityService.GetUploadFileType(files[i].ContentType),
+              Order = i,
+              ParentId = request.PayloadType == DocumentQueueBase.SendTemplate || request.PayloadType == DocumentQueueBase.MergeAndSend || i > 0
+                  ? parentDocumentId
+                  : string.Empty,
+              UploadType = UploadType.Local,
+              PageCount = pageCount[i],
+              UploadRequestType = request.PayloadType == DocumentQueueBase.Template ? UploadRequestType.Template
+                : UploadRequestType.Document,
+            });
+        }
+
+        await this.documentManipulatorService.MultipleUploadAsync(documentProperties.ToArray(), orgId, default)
+          .ConfigureAwait(false);
+      }
+
+      var uploadDocumentReply = new UploadResponse()
+      {
+        FileMessages = new List<FileMessage>(),
+        SendForSign = JsonConvert.SerializeObject(sendForSign),
+        RoleFormFields = roleFormFields,
+      };
+
+      for (var i = 0; i < files.Count; i++)
+      {
+        uploadDocumentReply.FileMessages.Add(
+          new FileMessage()
+          {
+            DocumentId = documentIds[i],
+            DocumentClientId = files[i].DocumentClientId,
+            FileName = files[i].FileName,
+            FileType = files[i].ContentType,
+            PageCount = pageCount[i],
+            StreamLength = files[i].FileSize,
+            IsTaggedPdf = isTaggedPdf.Count > i && isTaggedPdf[i],
+          });
+      }
+
+      this.logger.LogInformation($"queue-upload: Upload completed for {request?.DocumentId}");
+      return uploadDocumentReply;
+    }
+
+
+    public static List<RoleFormFields> MapTextTagsToFields(
+      ITextTag signRequestDetails,
+      List<DocumentUploadDetails> documentUploadDetails,
+      IDocumentManipulatorService documentManipulatorService,
+      string businessProfileDateFormat,
+      string businessProfileTimeFormat)
+    {
+      if (documentUploadDetails == null || documentUploadDetails.Count == 0)
+      {
+        return null;
+      }
+
+      List<TextTagDefinition> combinedTags = new List<TextTagDefinition>();
+      int pageIndex = 1;
+      foreach (var documentUploadDetail in documentUploadDetails)
+      {
+        var contentType = DocumentContentType.GetDocumentType(documentUploadDetail.ContentType, documentUploadDetail.DocumentName);
+        if (contentType == ContentType.Images)
+        {
+          pageIndex += 1;
+          continue;
+        }
+
+        if (contentType == ContentType.Word)
+        {
+          using var stream = new MemoryStream(documentUploadDetail.DocumentArray);
+          documentUploadDetail.DocumentArray = documentManipulatorService.ConvertWordToPdf(stream, null);
+          documentUploadDetail.ContentType = "application/pdf";
+        }
+
+        if (contentType == ContentType.Excel)
+        {
+          using var stream = new MemoryStream(documentUploadDetail.DocumentArray);
+          documentUploadDetail.DocumentArray = documentManipulatorService.ConvertExcelToPdf(stream, null);
+          documentUploadDetail.ContentType = "application/pdf";
+        }
+
+        using DocumentTextExtractor documentTextExtractor = new DocumentTextExtractor(documentUploadDetail.DocumentArray);
+        var documentTags = documentTextExtractor.ExtractTextTags(signRequestDetails.TextTagDefinitions, ref pageIndex);
+        combinedTags.AddRange(documentTags);
+      }
+
+      if (signRequestDetails is SendForSign sendForSign)
+      {
+        MapTagsToSignerFields(sendForSign, combinedTags, businessProfileDateFormat, businessProfileTimeFormat);
+        new TextTagDocumentValidator(sendForSign).Validate();
+        return null;
+      }
+      else if (signRequestDetails is CreateTemplateRequest createTemplate)
+      {
+        MapTagsToSignerFields(createTemplate, combinedTags, businessProfileDateFormat, businessProfileTimeFormat);
+        new TextTagTemplateValidator(createTemplate).Validate();
+        return null;
+      }
+      else if (signRequestDetails is MergeAndSendForSign)
+      {
+        var formFiled = ConvertTagsToRoleFormFields(combinedTags, businessProfileDateFormat, businessProfileTimeFormat);
+        new MergeAndSendTextTagValidator(formFiled).Validate(formFiled);
+        return formFiled;
+      }
+
+      return null;
+    }
+public List<TextTagDefinition> ExtractTextTags(List<TextTagDefinition> definitionTags, ref int pageIndex)
+    {
+      List<TextTagDefinition> tags = new List<TextTagDefinition>();
+
+      for (int i = 0; i < this.pdfLoadedDocument.Pages.Count; i++)
+      {
+        TextLineCollection textLineCollection = null;
+        this.pdfLoadedDocument.Pages[i].ExtractText(out textLineCollection);
+
+        foreach (var textLine in textLineCollection.TextLine)
+        {
+          definitionTags = definitionTags == null ? new List<TextTagDefinition>() : definitionTags;
+          TextTagParser textParser = new TextTagParser(new List<string>() { textLine.Text }, definitionTags);
+          var parsedTags = textParser.Parse();
+          Syncfusion.Drawing.SizeF pageSize = this.pdfLoadedDocument.Pages[i].Size;
+          this.SetBounds(textLine, parsedTags, pageSize);
+          int index = pageIndex;
+          parsedTags = parsedTags.Select(
+              c =>
+              {
+                c.PageNumber = index;
+
+                return c;
+              })
+            .ToList();
+          tags.AddRange(parsedTags);
+        }
+
+        pageIndex++;
+      }
+
+      return tags;
+    }
+
+        private List<TextTagDefinition> SetBounds(TextLine textLine, List<TextTagDefinition> parsedTags, Syncfusion.Drawing.SizeF pageSize)
+    {
+      var indexWord = 0;
+      var path = new PdfPath();
+
+      foreach (var tag in parsedTags)
+      {
+        var tagSpan = tag.TextTagContent.AsSpan();
+        var braceStarted = false;
+        var textBounds = default(Syncfusion.Drawing.RectangleF);
+
+        for (; indexWord < textLine.WordCollection.Count && !tagSpan.IsEmpty; indexWord++)
+        {
+          var textWord = textLine.WordCollection[indexWord];
+          var wordSpan = textWord.Text.AsSpan();
+
+          if (!ProcessWord(ref tagSpan, ref braceStarted, wordSpan, textWord, path))
+          {
+            continue;
+          }
+
+          if (!tagSpan.IsEmpty)
+          {
+            throw new TextTagException(CommonResource.ErrorWhileProcessingTextTagDocument);
+          }
+
+          var finalBounds = path.GetBounds() == textBounds ? textBounds : path.GetBounds();
+          this.SetBoundsToTextTags(tag, textWord, finalBounds, pageSize);
+          path = new PdfPath();
+          indexWord++;
+          break;
+        }
+      }
+
+      return parsedTags;
+    }
+
+    private static bool ProcessWord(ref ReadOnlySpan<char> tagSpan, ref bool braceStarted, ReadOnlySpan<char> wordSpan, TextWord textWord, PdfPath path)
+    {
+      if (tagSpan.Equals(wordSpan, StringComparison.OrdinalIgnoreCase))
+      {
+        path.AddRectangle(textWord.Bounds);
+        tagSpan = ReadOnlySpan<char>.Empty;
+        return true;
+      }
+
+      var indexOfStartBrace = wordSpan.IndexOf("{{", StringComparison.Ordinal);
+      var indexOfEndBrace = wordSpan.IndexOf("}}", StringComparison.Ordinal);
+
+      switch (indexOfStartBrace)
+      {
+        case >= 0 when
+          indexOfEndBrace > indexOfStartBrace:
+          AddGlyphsToPath(textWord, indexOfStartBrace, indexOfEndBrace + 2, path);
+          tagSpan = ReadOnlySpan<char>.Empty;
+          braceStarted = false;
+          return true;
+        case >= 0:
+        {
+          braceStarted = true;
+          AddGlyphsToPath(textWord, indexOfStartBrace, textWord.Glyphs.Count, path);
+          var charsToRemove = wordSpan.Length - indexOfStartBrace;
+          tagSpan = tagSpan[charsToRemove..];
+          return false;
+        }
+      }
+
+      if (braceStarted && indexOfEndBrace >= 0)
+      {
+        AddGlyphsToPath(textWord, 0, indexOfEndBrace + 2, path);
+        var charsToRemove = indexOfEndBrace + 2;
+        tagSpan = tagSpan[charsToRemove..];
+        braceStarted = false;
+        return tagSpan.IsEmpty;
+      }
+
+      if (!tagSpan.StartsWith(wordSpan, StringComparison.OrdinalIgnoreCase))
+      {
+        return false;
+      }
+
+      AddGlyphsToPath(textWord, 0, textWord.Glyphs.Count, path);
+      tagSpan = tagSpan[wordSpan.Length..];
+      return tagSpan.IsEmpty;
+        }
+
+    private static void AddGlyphsToPath(TextWord textWord, int startIndex, int endIndex, PdfPath path)
+    {
+      for (var i = startIndex; i < endIndex && i < textWord.Glyphs.Count; i++)
+      {
+        var glyph = textWord.Glyphs[i];
+        path.AddRectangle(glyph.Bounds);
+      }
+    }
+
+    private void SetBoundsToTextTags(
+      TextTagDefinition textTag,
+      TextWord textWord,
+      Syncfusion.Drawing.RectangleF totalBounds,
+      Syncfusion.Drawing.SizeF pageSize)
+    {
+      var x = totalBounds.X + (float)(textTag.Offset?.OffsetX ?? 0);
+      var y = totalBounds.Y + (float)(textTag.Offset?.OffsetY ?? 0);
+
+      ValidateOffset(
+        x,
+        y,
+        textTag,
+        pageSize);
+
+      totalBounds.X = x;
+      totalBounds.Y = y;
+
+      var textBoundsPixel = this.converter.ConvertToPixels(totalBounds, PdfGraphicsUnit.Point);
+
+      if (textTag.Size != null)
+      {
+        textBoundsPixel.Width = textTag.Size.Width;
+        textBoundsPixel.Height = textTag.Size.Height;
+      }
+
+      textTag.Bounds = new Rectangle()
+      {
+        X = textBoundsPixel.X,
+        Y = textBoundsPixel.Y,
+        Width = textBoundsPixel.Width,
+        Height = textBoundsPixel.Height,
+      };
+
+      if (IsFontSupportedFieldType(textTag.Type))
+      {
+        InitializeFont(textTag, textWord);
+      }
+    }
+
