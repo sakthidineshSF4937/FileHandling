@@ -1,0 +1,102 @@
+{
+  "signerRole": "Signer",
+  "privateMessage": "Please sign the document.",
+  "signerType": "Signer",
+  "signerOrder": 1,
+  "allowFieldConfiguration": true,
+  "recipientNotificationSettings": {
+    "reassigned": true,
+    "reminders": true,
+    "editDocument": true,
+    "expired": true,
+    "completed": true,
+    "declined": true,
+    "editRecipient": true,
+    "signatureRequest": true,
+    "deleted": true,
+    "signed": true,
+    "revoked": true
+  },
+  "name": "John Doe",
+  "enableEmailOTP": true,
+  "hostEmail": "john.doe@example.com",
+  "signType": "Single",
+  "deliveryMode": "Email",
+  "emailAddress": "sakthidinesh.pownraj+10@gmail.com",
+  "language": 1,
+  "locale": "EN",
+  "enableQes": true,
+  "identityVerificationSettings": {
+    "type": "EveryAccess",
+    "maximumRetryCount": 10,
+    "requireLiveCapture": true,
+    "requireMatchingSelfie": true,
+    "nameMatcher": "Strict",
+    "holdForPrefill": true
+  },
+  "authenticationRetryCount": 10
+}
+
+
+
+
+---------------------------------------------------------------------------------------------------------------------------
+
+textTagDefinitions
+
+{
+  "size": {
+    "width": 10,
+    "height": 10
+  },
+  "signerIndex": 50,
+  "isRequired": true,
+
+  "isReadOnly": true,
+  "definitionId": "1",
+  "font": {
+    "name": "Helvetica",
+    "color": "#000000",
+    "size": 8,
+    "lineHeight": 9,
+    "isBoldFont": true,
+    "isItalicFont": true,
+    "isUnderLineFont": true
+  },
+  "attachmentInfo": {
+    "title": "hello",
+    "description": "test",
+    "acceptedFileTypes": [
+      "pdf"
+    ]
+  },
+  "value": "sakthi dinesh",
+  "textDirection": "LTR",
+  "characterLimit": 2147483647,
+  "offset": {
+    "offsetX":5,
+    "offsetY":5
+  },
+  "placeholder": "sign here",
+  "label": "sign:",
+  "fieldId": "2",
+  "dataSyncTag": "sync123",
+  "textAlign": "Left",
+  "validation": {
+    "type": "Regex",
+    "regex": "^[A-Za-z ]+$",
+    "regexMessage": "Only alphabetic characters and spaces are allowed."
+  },
+  "characterSpacing": 1,
+  "type": "textbox"
+}
+
+_____________________________________
+
+
+{
+  "language": 1,
+  "locale": "EN",
+  "title": "SAT DOCUMENT",
+  "description": "Test Document"
+}
