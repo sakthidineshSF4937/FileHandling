@@ -1,0 +1,48 @@
+    public virtual async Task<bool> DeleteTemplatesItemsAsync(string[] templateIds, ClaimsPrincipal claims, IAuthorizationService authorizationService, IDocumentService documentService, UserDataService userDataService, HttpContext context, IOrgActivityService orgActivityService, IHubContext<NotificationHub> hubConnection, RequestDetailsService requestDetailsService)
+    {
+      HttpContext httpContext = context;
+      var permissionList = await new AccessRightsReader(context, null, this.apiRequestService)
+    .GetPermissionsListAsync(userDataService, this.cacheService).ConfigureAwait(false);
+      var allowedGroupsTuple = await PermissionAuthorizationHandler.GetResourceOwnerAllowedGroups(userDataService, context, Permissions.TemplateResources, this.cacheService, this.teamManagement, this.apiRequestService).ConfigureAwait(false);
+      var groupData = await this.teamManagement.GetTeamListAsync(userDataService).ConfigureAwait(false);
+      context.Items.TryAdd(DocumentDetailsReader.TeamListCache, groupData);
+      var deleteResults = new ConcurrentDictionary<string, bool>();
+      var deleteTasks = templateIds.Select(async templateId =>
+      {
+        try
+        {
+        var accessDetails = await this.GetTemplateByDocumentId(templateId, userDataService, DocumentStatus.Completed, allowedGroupsTuple.Item1).ConfigureAwait(false);
+
+        if (accessDetails == null)
+        {
+            deleteResults[templateId] = false;
+            return;
+        }
+
+        var templateDetailsReader = new TemplateDetailsReader(context, accessDetails, permissionList, this.cacheService, this.apiRequestService);
+        var role = new TemplatePolicy(context, templateDetailsReader, this.apiRequestService);
+
+        var authorizationRequirements = new List<IAuthorizationRequirement> { new TemplateDeleteRequirement() };
+
+        bool policySucceed = await documentService.GetPolicyStatus(authorizationRequirements, claims, role).ConfigureAwait(false);
+        string baseUrl = requestDetailsService.HostedDomain;
+        if (policySucceed)
+        {
+            var result = await this.AddDeletedTemplateItemAsync(templateId, documentService, userDataService).ConfigureAwait(false);
+            await documentService.NotifyDeletedTemplatesUsers(accessDetails, new Uri(baseUrl), hubConnection, this.teamManagement).ConfigureAwait(false);
+            _ = this.LogDeletesUserActivityAsync(accessDetails, orgActivityService);
+            deleteResults[templateId] = result;
+        }
+        else
+        {
+            deleteResults[templateId] = false;
+        }
+    }
+    catch (Exception)
+    {
+        deleteResults[templateId] = false;
+    }
+    }).ToList();
+      await Task.WhenAll(deleteTasks).ConfigureAwait(false);
+      return deleteResults.Values.All(result => result);
+}
