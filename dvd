@@ -27,4 +27,30 @@
     }
 
 
-modify it for deleting multiple template  once all the template delete it need to show suceess 
+modify it for deleting multiple template  once all the template delete it need to show suceess and controller method only has to send the template id and service method has all the methods for delete
+once each template delete email should be sent by using notifydeletedtemplateduser once everything completed and sucess it shows sucess 
+
+below service method 
+   public async Task<bool> DeleteTemplatesByDocumentIdAsync(string orgId, string documentId)
+    {
+      string indexName = orgId;
+      DeleteByQueryRequest<AccessRightsDetails> deleteQuery = new DeleteByQueryRequest<AccessRightsDetails>(indexName)
+      {
+        Query = new BoolQuery
+        {
+          Must = new QueryContainer[]
+          {
+            new TermQuery { Field = ConstantSearchFields.DocumentType, Value = DocumentType.Template } &&
+            new TermQuery { Field = ConstantSearchFields.Status, Value = DocumentStatus.Completed } &&
+            new TermQuery { Field = ConstantSearchFields.DocumentId, Value = documentId },
+          },
+        },
+      };
+
+      await this.elasticClient.DeleteByQueryAsync(deleteQuery).ConfigureAwait(false);
+      return true;
+    }
+
+
+
+
