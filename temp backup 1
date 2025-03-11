@@ -1,0 +1,62 @@
+ public virtual async Task<bool> DeleteTemplatesItemsAsync(string[] templateIds, ClaimsPrincipal claims, IAuthorizationService authorizationService, IDocumentService documentService, UserDataService userDataService, HttpContext context, IOrgActivityService orgActivityService, IHubContext<NotificationHub> hubConnection, RequestDetailsService requestDetailsService)
+    {
+    var permissionList = await new AccessRightsReader(this.httpContextAccessor.HttpContext, null, this.apiRequestService)
+        .GetPermissionsListAsync(userDataService, this.cacheService).ConfigureAwait(false);
+
+    var allowedGroupsTuple = await PermissionAuthorizationHandler.GetResourceOwnerAllowedGroups(
+        userDataService, context, Permissions.TemplateResources, this.cacheService, this.teamManagement, this.apiRequestService)
+        .ConfigureAwait(false);
+
+    var groupData = await this.teamManagement.GetTeamListAsync(userDataService).ConfigureAwait(false);
+    context.Items.TryAdd(DocumentDetailsReader.TeamListCache, groupData);
+
+    string baseUrl = requestDetailsService.HostedDomain;
+
+    var deleteTasks = templateIds.Select(async templateId =>
+    {
+ try
+        {
+ var accessRightsList = await this.GetTemplatesByDocumentId(userDataService, templateId, false).ConfigureAwait(false);
+            if (accessRightsList.Count == 0)
+            {
+                return new KeyValuePair<string, bool>(templateId, false);
+            }
+      var accessDetails = await this.GetTemplateByDocumentId(templateId, userDataService, DocumentStatus.Completed, allowedGroupsTuple.Item1)
+                .ConfigureAwait(false);
+  var templateDetailsReader = new TemplateDetailsReader(context, accessDetails, permissionList, this.cacheService, this.apiRequestService);
+            var role = new TemplatePolicy(this.httpContextAccessor.HttpContext, templateDetailsReader, this.apiRequestService);
+            var documentDetails = CacheDocumentDetails.GetDocumentDetailsCacheAsync(context) ??
+                await this.documentContentService.GetDocumentDetails(templateId).ConfigureAwait(false);
+            context.Items[DocumentDetailsReader.DocumentDetailsData] = documentDetails;
+  List<IAuthorizationRequirement> authorizationRequirements = new List<IAuthorizationRequirement>
+            {
+                new TemplateDeleteRequirement(),
+            };
+ bool policySucceed = await documentService.GetPolicyStatus(authorizationRequirements, claims, role).ConfigureAwait(false);
+            if (policySucceed)
+            {
+                var result = await this.AddDeletedTemplateItemAsync(templateId, documentService, userDataService).ConfigureAwait(false);
+                if (result)
+                {
+                await documentService.NotifyDeletedTemplateUsers(accessRightsList, new Uri(baseUrl), hubConnection, this.teamManagement).ConfigureAwait(false);
+                _ = this.LogDeleteUserActivityAsync(accessRightsList, orgActivityService).ConfigureAwait(false);
+                }
+   context.Items.Remove(DocumentDetailsReader.DocumentDetailsData);
+
+                return new KeyValuePair<string, bool>(templateId, result);
+            }
+            else
+            {
+                return new KeyValuePair<string, bool>(templateId, false);
+            }
+        }
+ catch (Exception)
+        {
+  return new KeyValuePair<string, bool>(templateId, false);
+        }
+});
+
+    var deleteResults = await Task.WhenAll(deleteTasks).ConfigureAwait(false);
+
+    return deleteResults.All(result => result.Value);
+}
