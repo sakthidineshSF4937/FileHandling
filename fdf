@@ -1,0 +1,398 @@
+<template>
+  <div style="height: 100%">
+    <div class="bs-thumb-container-body" :style="{ display: 'block', overflow: 'hidden', height: '100%' }">
+      <div class="show-thumb-content" :style="{ right : !disableThumbContainer && !showThumbContainer ? '0px' : isMobileMode ? '200px' : '220px', display: isResponsiveLayout() ? 'block': 'none'}">
+        <div :style="{ display : !showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="showThumbTooltip" :content="showThumbnailsTooltipContent">
+            <ejs-button :iconCss="expandPanelIcon" style="width:32px;" @click="showOrHideThumbContainer" />
+          </ejs-tooltip>
+        </div>
+        <div :style="{ display : showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="hideThumbTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+            <span :class="collapsePanelIcon + ' header-icon'" @click="showOrHideThumbContainer" ></span>
+          </ejs-tooltip>
+        </div>
+        <div class="show-page-navigation">
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnail') }}</span>
+        </div>
+      </div>
+      <div id="thumbnailContainer" :class="'bs-thumb-container' + thumbState" :style="{ display : !disableThumbContainer && showThumbContainer ? 'block' : 'none', height: getThumbHeight() }">
+        <div class="bs-thumbnail-images-container">
+          <div class="bs-thumbnail-header">
+            <div class="bs-thumbnail-tooltip-container">
+              <ejs-tooltip ref="thumbnailTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+                <span
+                  id="thumbnailsHeader"
+                  :tabindex="0"
+                  role="button"
+                  :class="collapsePanelIcon + ' header-icon'"
+                  :aria-label="hideThumbnailsTooltipContent"
+                  @click="showOrHideThumbContainer"
+                  @keydown.enter="showOrHideThumbContainer"
+                ></span>
+              </ejs-tooltip>
+              <span class="header-text" style="margin-left: 8px; padding-top: 2px;">{{ $t('thumbnailComponent.thumbnail') }}</span>
+            </div>
+            <ejs-tooltip
+              ref="thumbnailHeadingToolTip"
+              :content="thumbnailDocHeading"
+              cssClass="tooltip-max-width"
+              target=".pdf-file-indicator"
+              width="auto"
+              style="display: inline-flex; overflow: hidden;"
+            >
+              <div id="thumbnailFileName">
+                <span id="thumbnailPdfFileIndicator" class="pdf-file-indicator" style="display: inline-block; float: left; width:auto;">{{ thumbnailDocHeading }}</span>
+                <span style="display: inline-block;font-size: 12px;float: left;margin: 10px 0px 0px 4px; color: #666e80;min-width: 72px;">{{ thumbnailDocPageCount }}</span>
+              </div>
+            </ejs-tooltip>
+          </div>
+          <div id="thumbnailBody" class="bs-thumbnail-body" @scroll="thumbScrollChange">
+            <div v-for="(thumbnail, index) in thumbData" :key="thumbnail.pageId">
+              <div v-if="thumbnail.isFirstPage && currentPdfFile !== thumbnail.documentName" id="thumbnailBodyPdfFileIndicator" class="pdf-file-indicator">
+                <ejs-tooltip :content="thumbnail.documentName" width="auto" maxWidth="120px" style="display: inline-flex; overflow: hidden;" cssClass="tooltip-max-width">
+                  <span class="document-name-tooltip" style="display: inline-block;width: auto;float: left;text-overflow: ellipsis;overflow: hidden;white-space: nowrap; font-weight: 500;">{{ thumbnail.documentName }}</span>
+                </ejs-tooltip>
+                <span style="display: inline-block;font-size: 12px;float: left;color: rgb(102, 110, 128);max-width: 72px;margin-left: 4px;font-weight: 400;">
+                  {{ thumbnail.pageCount > 1 ? $t('thumbnailComponent.thumbnailPageCount', { pageCount: thumbnail.pageCount }) : $t('thumbnailComponent.thumbnailSinglePage', { pageCount: thumbnail.pageCount }) }}
+                </span>
+              </div>
+              <div v-show="thumbnail.source" :id="'thumbnail_' + (thumbnail.uniqueId)" align="center" style="padding-top:14px">
+                <div class="bs-thumb-content-container">
+                  <div :id="'thumbImageContainer_' + (index + 1)" class="bs-thumb-image-container" :tabindex="100 + index" style="outline: none;" @click="navigatePageFromThumbnail(index+1)">
+                    <img :src="thumbnail.source" style="width:100%; height: 155px; border-radius: 4px; pointer-events: none" :alt="thumbnailAlt" @load="imgLoad"/>
+                  </div>
+                  <div class="bs-thumb-border-container">
+                    <span class="field-count-span" ></span>
+                  </div>
+                  <div class="bs-thumb-complete-container">
+                    <span class="sf-icon-Tick" ></span>
+                  </div>
+                </div>
+                <div style="margin-top: 8px; height: 18px; width: 100%; display: table">
+                  <span style="display:table-cell; vertical-align:middle; text-align: center">{{ index + 1 }}</span>
+                </div>
+              </div>
+              <div v-show="!thumbnail.source" :id="'thumbnailPage_' + (thumbnail.uniqueId)" style="width: 100%; height:calc(100% - 120px);">
+                <ThumbnailSkeleton />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bs-thumbnail-overlay" style="width: 100%; height:calc(100% - 120px);">
+          <ThumbnailTemplate />
+        </div>
+      </div>
+      <div class="show-thumb-content" :style="{ display : !disableThumbContainer && !showThumbContainer && !isResponsiveLayout() ? 'block' : 'none' }">
+        <ejs-tooltip ref="showOrHideThumbToolTip" :content="showThumbnailsTooltipContent">
+          <ejs-button
+            id="expandThumbnail"
+            tabindex="0"
+            :aria-label="$t('thumbnailComponent.showThumbnail')"
+            :iconCss="expandPanelIcon"
+            style="width:32px;"
+            @click="showOrHideThumbContainer"
+          />
+        </ejs-tooltip>
+        <div class="show-page-navigation">
+          <ejs-button id="pagePreviousButton" :iconCss="pagePreviousIcon" style="width:32px;" :class="[disablePreviousPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']" @click="clickPreviousPage" />
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnailPage', { currentPage: currentPage, totalPage: totalPage }) }}</span>
+          <ejs-button
+            id="pageNextButton"
+            :iconCss="pageNextIcon"
+            class="sf-down-arrow"
+            style="width:32px;"
+            :class="[disableNextPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']"
+            @click="clickNextPage"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script lang="ts">
+import { defineComponent } from 'vue';
+import { TooltipComponent } from '@syncfusion/ej2-vue-popups';
+import { ButtonComponent } from '@syncfusion/ej2-vue-buttons';
+import { UtilityMethods } from '../types/util';
+import { FormElement, PageFormElements, DocumentProperties, ResponsiveMode, CheckboxCondition, BoundingRect, ResizeOptions } from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+import { Accessibility } from '../types/accessibility';
+import ThumbnailSkeleton from './thumbnail-skeleton.vue';
+import ThumbnailTemplate from './thumbnail-template.vue';
+
+export default defineComponent({
+  name: 'ThumbnailComponent',
+  components: {
+    ThumbnailTemplate,
+    ThumbnailSkeleton,
+    'ejs-tooltip': TooltipComponent,
+    'ejs-button': ButtonComponent
+  },
+
+  emits: ['showSkeleton', 'showThumb'],
+
+  data () {
+    let updateAccessibleElements: Function;
+    const isThumbnailRendered: boolean = false;
+    const pdfFormElement: PdfFormElements = null;
+    const documentProperties: DocumentProperties[] = [];
+    const isScreenReaderClicked: boolean = false;
+    return {
+      updateAccessibleElements,
+      isThumbnailRendered,
+      pdfFormElement,
+      documentProperties,
+      isScreenReaderClicked,
+      expandPanelIcon: 'sf-icon-Sidepaneleft1',
+      collapsePanelIcon: 'sf-icon-PanelCollapse',
+      pageNextIcon: 'sf-icon-Control',
+      pagePreviousIcon: 'sf-icon-Control',
+      hideThumbnailsTooltipContent: this.$t('thumbnailComponent.hideThumbnailsTooltipContent'),
+      showThumbnailsTooltipContent: this.$t('thumbnailComponent.showThumbnailsTooltipContent'),
+      thumbnailAlt: this.$t('accessibility.thumbnailAlt'),
+      thumbState: '',
+      showThumbContainer: this.isShowThumbContainer(),
+      disableThumbContainer: false,
+      thumbData: [],
+      thumbnailDocHeading: '',
+      thumbnailDocPageCount: '',
+      currentPdfFile: '',
+      disableNextPage: false,
+      disablePreviousPage: false,
+      currentPage: 0,
+      totalPage: 0,
+      showAdvanceFields: false,
+      isSignerMode: false,
+      fieldRelationId: '',
+      isMobileMode: UtilityMethods.getResponsiveModes(this.$session.responsiveLayout.responsiveMode).isMobileMode,
+      observer: null
+    };
+  },
+
+  /* Data lables Implementation Ends */
+
+  mounted (): void {
+    window.addEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+
+  beforeUnmount () {
+    window.removeEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+  methods: {
+    addObserver (): void {
+      const observableElements = document.querySelectorAll('.bs-thumbnail-body')[0];
+      observableElements.childNodes.forEach((el) => {
+        if (el.nodeType === 1) {
+          this.$data.observer = new IntersectionObserver(
+            this.onThumbnailRenderObserver,
+            {
+              threshold: 0
+            }
+          );
+          this.$data.observer.observe(el);
+        }
+      });
+    },
+
+    onThumbnailRenderObserver (entries: IntersectionObserverEntry[]): void {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const uniqueId = entry.target.children[1].id.split('_')[1];
+          if (!uniqueId) {
+            this.$sentry.captureException(new Error('Thumbnail uniqueId does not exist'));
+          } else {
+            const context = (this as any);
+            this.renderThumbnailWithRetry(context, uniqueId);
+          }
+        }
+      });
+    },
+
+    renderThumbnailWithRetry (context: any, uniqueId:string, retryCount : number = 2): any {
+      const pageIndex = context.$data.thumbData.findIndex(page => page.uniqueId === uniqueId);
+      if (pageIndex === -1) {
+        this.$sentry.captureException(new Error('Thumbnail pageIndex does not exist'));
+      } else {
+        const pageToUpdate = context.$data.thumbData[pageIndex];
+        if (!pageToUpdate.source) {
+          const embedData: any = this.$session.embedData;
+          const mainData: any = this.$session.mainData;
+          let signerId = mainData.currentUserId ? mainData.currentUserId : mainData.currentSignerId;
+          if (embedData.isEmbedPage) {
+            signerId = embedData.embedId;
+          }
+          const thumbnailContentDetails = {
+            documentId: pageToUpdate.documentId,
+            parentDocumentId: pageToUpdate.parentDocumentId,
+            currentPageNumber: pageToUpdate.currentDocumentPageNumber.toString(),
+            uniqueId: pageToUpdate.uniqueId,
+            signerId,
+            secretId: mainData.secretId
+          };
+          this.$nuxt.$api.thumbnail.renderThumbnail({
+            data: thumbnailContentDetails
+          }).then((response) => {
+            const updateIndex = context.$data.thumbData.findIndex(page => page.uniqueId === response.uniqueId);
+            if (updateIndex !== -1) {
+              const reader = new FileReader();
+              reader.onloadend = function () {
+                context.$data.thumbData[updateIndex].source = reader.result;
+              };
+              reader.readAsDataURL(response.data);
+            }
+          }).catch((error) => {
+            if (retryCount > 0) {
+              this.renderThumbnailWithRetry(context, uniqueId, retryCount - 1);
+            } else {
+              this.$sentry.captureException(error);
+            }
+          });
+        }
+      }
+    },
+
+    imgLoad (): void {
+      if (this.$data.thumbState) {
+        this.$data.thumbState = '';
+      }
+    },
+
+    loadThumbnail (pdfFormElement: PdfFormElements, documentProperties: DocumentProperties[], pageName: string, isSignerMode: boolean = false): void {
+      this.pdfFormElement = pdfFormElement;
+      this.documentProperties = documentProperties;
+      this.$data.isSignerMode = isSignerMode;
+      if (pageName === 'prepare') {
+        if (this.$session.mainData.isDocumentAddedorReplaced) {
+          this.$emit('showSkeleton');
+        } else {
+          this.$mutation.updateMainData({ prepareProgress: false });
+        }
+      }
+      this.$data.thumbState = ' show-progress';
+      this.$data.thumbData = UtilityMethods.generateThumbImages(documentProperties);
+      setTimeout((): void => {
+        this.imgLoad();
+        this.addObserver();
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+        thumbImageContainer.parentElement.classList.add('active-thumb');
+        this.isThumbnailRendered = true;
+        for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+          const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+          if (pageName === 'sign') {
+            this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+          } else {
+            this.updateThumbnailFieldCount(pageFormElement.pageIndex);
+          }
+        }
+        const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+        this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+        this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+        this.$data.thumbnailDocHeading = docProperties.documentName;
+        this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+        this.$data.currentPdfFile = docProperties.documentName;
+        if (pageName === 'sign') {
+          Accessibility.setAccessibilityAttributesAfterPageLoad();
+          UtilityMethods.triggerEvent(this.updateAccessibleElements, {});
+        }
+      }, 100);
+    },
+
+    updateThumbnailFieldCount (pageIndex: number): void {
+      const context = this as any;
+      if (this.isThumbnailRendered) {
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        if (!thumbImageContainer.parentElement.classList.contains('enable-field-count')) {
+          thumbImageContainer.parentElement.classList.add('enable-field-count');
+        }
+        const fieldSpan: HTMLSpanElement = thumbImageContainer.nextElementSibling.children[0] as HTMLSpanElement;
+        const pageFormElement: PageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageIndex);
+        let fieldCount: number = 0;
+        if (pageFormElement && pageFormElement.formElements && pageFormElement.formElements.length > 0) {
+          fieldCount = pageFormElement.formElements.filter((formElement: FormElement) => formElement.id !== 'multipleSelection' && formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && (formElement.elementType !== 'checkbox' || (formElement.groupName === null)) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing)).length;
+          const checkboxElement = this.pdfFormElement.checkboxFieldCount();
+          fieldCount += checkboxElement.length > 0 ? checkboxElement.filter(x => x.pageIndex === pageIndex).length : 0;
+        }
+        if (fieldCount > 0) {
+          fieldSpan.innerText = fieldCount + (fieldCount > 1 ? ' ' + context.$t('common.fields') : ' ' + context.$t('common.field')) + ' ' + context.$t('common.added');
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    updatePageContent (documentProperties: DocumentProperties[]) {
+      const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+      const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+      this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+      for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+        const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+        this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+      }
+      this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+      this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+    },
+
+    updateFieldRelationId (fieldRelationId: any): void {
+      this.$data.fieldRelationId = fieldRelationId;
+    },
+
+    onPageChangeEvent (args: any, documentList: any): void {
+      if (this.isThumbnailRendered) {
+        UtilityMethods.scrollThumbImageToView(args.currentPageNumber, this.$data.thumbData);
+      }
+      if (!this.$data.showThumbContainer) {
+        this.$data.currentPage = args.currentPageNumber;
+        const totalPage = UtilityMethods.getPageCount(documentList);
+        if (this.$data.currentPage === 1) {
+          this.$data.disablePreviousPage = true;
+          this.$data.disableNextPage = false;
+        } else if (totalPage !== 1 && totalPage === args.currentPageNumber) {
+          this.$data.disableNextPage = true;
+          this.$data.disablePreviousPage = false;
+        } else {
+          this.$data.disableNextPage = false;
+          this.$data.disablePreviousPage = false;
+        }
+      }
+    },
+
+    updateThumbnailFieldCountSigningPage (pageIndex: number, formElements: FormElement[]): void {
+      if (this.isThumbnailRendered) {
+        const context = this as any;
+        const thumbImageContainer1: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        const status: string = this.getFiledFormElements(formElements);
+        const fieldSpan: HTMLSpanElement = thumbImageContainer1.nextElementSibling.children[0] as HTMLSpanElement;
+        const fieldCount: number = this.getTotalFieldCount(formElements);
+        if (status === 'success' && fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+
+          const filledCount: number = this.getFilledCount(formElements);
+          fieldSpan.innerText = filledCount + ' ' + context.$t('common.of') + ' ' + fieldCount + ' ' + context.$t('common.fields') + ' ' + context.$t('common.filled');
+        } else if (fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+          if (thumbImageContainer1.parentElement.classList.contains('enable-complete-container')) {
+            thumbImageContainer1.parentElement.classList.remove('enable-complete-container');
+          }
+          fieldSpan.innerText = status;
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer1.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+
+
+
+
+
+
+
+I need to keep trash icon near to the pageno and if i click the trash icon i need to call api with documentid and selectedpageno
