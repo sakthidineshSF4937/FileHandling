@@ -1,0 +1,724 @@
+<template>
+  <div style="height: 100%">
+    <div class="bs-thumb-container-body" :style="{ display: 'block', overflow: 'hidden', height: '100%' }">
+      <div class="show-thumb-content" :style="{ right : !disableThumbContainer && !showThumbContainer ? '0px' : isMobileMode ? '200px' : '220px', display: isResponsiveLayout() ? 'block': 'none'}">
+        <div :style="{ display : !showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="showThumbTooltip" :content="showThumbnailsTooltipContent">
+            <ejs-button :iconCss="expandPanelIcon" style="width:32px;" @click="showOrHideThumbContainer" />
+          </ejs-tooltip>
+        </div>
+        <div :style="{ display : showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="hideThumbTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+            <span :class="collapsePanelIcon + ' header-icon'" @click="showOrHideThumbContainer" ></span>
+          </ejs-tooltip>
+        </div>
+        <div class="show-page-navigation">
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnail') }}</span>
+        </div>
+      </div>
+      <div id="thumbnailContainer" :class="'bs-thumb-container' + thumbState" :style="{ display : !disableThumbContainer && showThumbContainer ? 'block' : 'none', height: getThumbHeight() }">
+        <div class="bs-thumbnail-images-container">
+          <div class="bs-thumbnail-header">
+            <div class="bs-thumbnail-tooltip-container">
+              <ejs-tooltip ref="thumbnailTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+                <span
+                  id="thumbnailsHeader"
+                  :tabindex="0"
+                  role="button"
+                  :class="collapsePanelIcon + ' header-icon'"
+                  :aria-label="hideThumbnailsTooltipContent"
+                  @click="showOrHideThumbContainer"
+                  @keydown.enter="showOrHideThumbContainer"
+                ></span>
+              </ejs-tooltip>
+              <span class="header-text" style="margin-left: 8px; padding-top: 2px;">{{ $t('thumbnailComponent.thumbnail') }}</span>
+            </div>
+            <ejs-tooltip
+              ref="thumbnailHeadingToolTip"
+              :content="thumbnailDocHeading"
+              cssClass="tooltip-max-width"
+              target=".pdf-file-indicator"
+              width="auto"
+              style="display: inline-flex; overflow: hidden;"
+            >
+              <div id="thumbnailFileName">
+                <span id="thumbnailPdfFileIndicator" class="pdf-file-indicator" style="display: inline-block; float: left; width:auto;">{{ thumbnailDocHeading }}</span>
+                <span style="display: inline-block;font-size: 12px;float: left;margin: 10px 0px 0px 4px; color: #666e80;min-width: 72px;">{{ thumbnailDocPageCount }}</span>
+              </div>
+            </ejs-tooltip>
+          </div>
+          <div id="thumbnailBody" class="bs-thumbnail-body" @scroll="thumbScrollChange">
+            <div v-for="(thumbnail, index) in thumbData" :key="thumbnail.pageId">
+              <div v-if="thumbnail.isFirstPage && currentPdfFile !== thumbnail.documentName" id="thumbnailBodyPdfFileIndicator" class="pdf-file-indicator">
+                <ejs-tooltip :content="thumbnail.documentName" width="auto" maxWidth="120px" style="display: inline-flex; overflow: hidden;" cssClass="tooltip-max-width">
+                  <span class="document-name-tooltip" style="display: inline-block;width: auto;float: left;text-overflow: ellipsis;overflow: hidden;white-space: nowrap; font-weight: 500;">{{ thumbnail.documentName }}</span>
+                </ejs-tooltip>
+                <span style="display: inline-block;font-size: 12px;float: left;color: rgb(102, 110, 128);max-width: 72px;margin-left: 4px;font-weight: 400;">
+                  {{ thumbnail.pageCount > 1 ? $t('thumbnailComponent.thumbnailPageCount', { pageCount: thumbnail.pageCount }) : $t('thumbnailComponent.thumbnailSinglePage', { pageCount: thumbnail.pageCount }) }}
+                </span>
+              </div>
+              <div v-show="thumbnail.source" :id="'thumbnail_' + (thumbnail.uniqueId)" align="center" style="padding-top:14px">
+                <div class="bs-thumb-content-container">
+                  <div :id="'thumbImageContainer_' + (index + 1)" class="bs-thumb-image-container" :tabindex="100 + index" style="outline: none;" @click="navigatePageFromThumbnail(index+1)">
+                    <img :src="thumbnail.source" style="width:100%; height: 155px; border-radius: 4px; pointer-events: none" :alt="thumbnailAlt" @load="imgLoad"/>
+                  </div>
+                  <div class="bs-thumb-border-container">
+                    <span class="field-count-span" ></span>
+                  </div>
+                  <div class="bs-thumb-complete-container">
+                    <span class="sf-icon-Tick" ></span>
+                  </div>
+                </div>
+                <!-- <div style="margin-top: 8px; height: 18px; width: 100%; display: table">
+                  <span style="display:table-cell; vertical-align:middle; text-align: center">{{ index + 1 }}</span>
+                </div> -->
+                <div style="margin-top: 8px; height: 18px; width: 100%; display: flex; justify-content: center; align-items: center; gap: 8px;">
+               <span>{{ index + 1 }}</span>
+               <span class="sf-icon-Delete" style="cursor: pointer; font-size: 14px; color: red;" 
+               @click="deletePage(thumbnail.documentId, index + 1)"></span>
+              </div>
+              </div>
+              <div v-show="!thumbnail.source" :id="'thumbnailPage_' + (thumbnail.uniqueId)" style="width: 100%; height:calc(100% - 120px);">
+                <ThumbnailSkeleton />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bs-thumbnail-overlay" style="width: 100%; height:calc(100% - 120px);">
+          <ThumbnailTemplate />
+        </div>
+      </div>
+      <div class="show-thumb-content" :style="{ display : !disableThumbContainer && !showThumbContainer && !isResponsiveLayout() ? 'block' : 'none' }">
+        <ejs-tooltip ref="showOrHideThumbToolTip" :content="showThumbnailsTooltipContent">
+          <ejs-button
+            id="expandThumbnail"
+            tabindex="0"
+            :aria-label="$t('thumbnailComponent.showThumbnail')"
+            :iconCss="expandPanelIcon"
+            style="width:32px;"
+            @click="showOrHideThumbContainer"
+          />
+        </ejs-tooltip>
+        <div class="show-page-navigation">
+          <ejs-button id="pagePreviousButton" :iconCss="pagePreviousIcon" style="width:32px;" :class="[disablePreviousPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']" @click="clickPreviousPage" />
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnailPage', { currentPage: currentPage, totalPage: totalPage }) }}</span>
+          <ejs-button
+            id="pageNextButton"
+            :iconCss="pageNextIcon"
+            class="sf-down-arrow"
+            style="width:32px;"
+            :class="[disableNextPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']"
+            @click="clickNextPage"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script lang="ts">
+import { defineComponent } from 'vue';
+import { TooltipComponent } from '@syncfusion/ej2-vue-popups';
+import { ButtonComponent } from '@syncfusion/ej2-vue-buttons';
+import { UtilityMethods } from '../types/util';
+import { FormElement, PageFormElements, DocumentProperties, ResponsiveMode, CheckboxCondition, BoundingRect, ResizeOptions } from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+import { Accessibility } from '../types/accessibility';
+import ThumbnailSkeleton from './thumbnail-skeleton.vue';
+import ThumbnailTemplate from './thumbnail-template.vue';
+
+export default defineComponent({
+  name: 'ThumbnailComponent',
+  components: {
+    ThumbnailTemplate,
+    ThumbnailSkeleton,
+    'ejs-tooltip': TooltipComponent,
+    'ejs-button': ButtonComponent
+  },
+
+  emits: ['showSkeleton', 'showThumb'],
+
+  data () {
+    let updateAccessibleElements: Function;
+    const isThumbnailRendered: boolean = false;
+    const pdfFormElement: PdfFormElements = null;
+    const documentProperties: DocumentProperties[] = [];
+    const isScreenReaderClicked: boolean = false;
+    return {
+      updateAccessibleElements,
+      isThumbnailRendered,
+      pdfFormElement,
+      documentProperties,
+      isScreenReaderClicked,
+      expandPanelIcon: 'sf-icon-Sidepaneleft1',
+      collapsePanelIcon: 'sf-icon-PanelCollapse',
+      pageNextIcon: 'sf-icon-Control',
+      pagePreviousIcon: 'sf-icon-Control',
+      hideThumbnailsTooltipContent: this.$t('thumbnailComponent.hideThumbnailsTooltipContent'),
+      showThumbnailsTooltipContent: this.$t('thumbnailComponent.showThumbnailsTooltipContent'),
+      thumbnailAlt: this.$t('accessibility.thumbnailAlt'),
+      thumbState: '',
+      showThumbContainer: this.isShowThumbContainer(),
+      disableThumbContainer: false,
+      thumbData: [],
+      thumbnailDocHeading: '',
+      thumbnailDocPageCount: '',
+      currentPdfFile: '',
+      disableNextPage: false,
+      disablePreviousPage: false,
+      currentPage: 0,
+      totalPage: 0,
+      showAdvanceFields: false,
+      isSignerMode: false,
+      fieldRelationId: '',
+      isMobileMode: UtilityMethods.getResponsiveModes(this.$session.responsiveLayout.responsiveMode).isMobileMode,
+      observer: null
+    };
+  },
+
+  /* Data lables Implementation Ends */
+
+  mounted (): void {
+    window.addEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+
+  beforeUnmount () {
+    window.removeEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+  methods: {
+    addObserver (): void {
+      const observableElements = document.querySelectorAll('.bs-thumbnail-body')[0];
+      observableElements.childNodes.forEach((el) => {
+        if (el.nodeType === 1) {
+          this.$data.observer = new IntersectionObserver(
+            this.onThumbnailRenderObserver,
+            {
+              threshold: 0
+            }
+          );
+          this.$data.observer.observe(el);
+        }
+      });
+    },
+
+    onThumbnailRenderObserver (entries: IntersectionObserverEntry[]): void {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const uniqueId = entry.target.children[1].id.split('_')[1];
+          if (!uniqueId) {
+            this.$sentry.captureException(new Error('Thumbnail uniqueId does not exist'));
+          } else {
+            const context = (this as any);
+            this.renderThumbnailWithRetry(context, uniqueId);
+          }
+        }
+      });
+    },
+    async deletePage(documentId, selectedPageNo) {
+      try {
+        const payload = {
+          documentId,
+          selectedPageNo
+        };
+        const response = await this.$nuxt.$api.thumbnail.deletePage({ data: payload });
+        console.log(response);
+
+        if (response.success) {
+          console.log("page deleted successfully")
+        } else {
+          console.log("pag not deleted")
+        }
+      } catch (error) {
+        this.$sentry.captureException(error);
+      }
+    },
+
+    renderThumbnailWithRetry (context: any, uniqueId:string, retryCount : number = 2): any {
+      const pageIndex = context.$data.thumbData.findIndex(page => page.uniqueId === uniqueId);
+      if (pageIndex === -1) {
+        this.$sentry.captureException(new Error('Thumbnail pageIndex does not exist'));
+      } else {
+        const pageToUpdate = context.$data.thumbData[pageIndex];
+        if (!pageToUpdate.source) {
+          const embedData: any = this.$session.embedData;
+          const mainData: any = this.$session.mainData;
+          let signerId = mainData.currentUserId ? mainData.currentUserId : mainData.currentSignerId;
+          if (embedData.isEmbedPage) {
+            signerId = embedData.embedId;
+          }
+          const thumbnailContentDetails = {
+            documentId: pageToUpdate.documentId,
+            parentDocumentId: pageToUpdate.parentDocumentId,
+            currentPageNumber: pageToUpdate.currentDocumentPageNumber.toString(),
+            uniqueId: pageToUpdate.uniqueId,
+            signerId,
+            secretId: mainData.secretId
+          };
+          this.$nuxt.$api.thumbnail.renderThumbnail({
+            data: thumbnailContentDetails
+          }).then((response) => {
+            const updateIndex = context.$data.thumbData.findIndex(page => page.uniqueId === response.uniqueId);
+            if (updateIndex !== -1) {
+              const reader = new FileReader();
+              reader.onloadend = function () {
+                context.$data.thumbData[updateIndex].source = reader.result;
+              };
+              reader.readAsDataURL(response.data);
+            }
+          }).catch((error) => {
+            if (retryCount > 0) {
+              this.renderThumbnailWithRetry(context, uniqueId, retryCount - 1);
+            } else {
+              this.$sentry.captureException(error);
+            }
+          });
+        }
+      }
+    },
+
+    imgLoad (): void {
+      if (this.$data.thumbState) {
+        this.$data.thumbState = '';
+      }
+    },
+
+    loadThumbnail (pdfFormElement: PdfFormElements, documentProperties: DocumentProperties[], pageName: string, isSignerMode: boolean = false): void {
+      this.pdfFormElement = pdfFormElement;
+      this.documentProperties = documentProperties;
+      this.$data.isSignerMode = isSignerMode;
+      if (pageName === 'prepare') {
+        if (this.$session.mainData.isDocumentAddedorReplaced) {
+          this.$emit('showSkeleton');
+        } else {
+          this.$mutation.updateMainData({ prepareProgress: false });
+        }
+      }
+      this.$data.thumbState = ' show-progress';
+      this.$data.thumbData = UtilityMethods.generateThumbImages(documentProperties);
+      setTimeout((): void => {
+        this.imgLoad();
+        this.addObserver();
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+        thumbImageContainer.parentElement.classList.add('active-thumb');
+        this.isThumbnailRendered = true;
+        for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+          const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+          if (pageName === 'sign') {
+            this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+          } else {
+            this.updateThumbnailFieldCount(pageFormElement.pageIndex);
+          }
+        }
+        const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+        this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+        this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+        this.$data.thumbnailDocHeading = docProperties.documentName;
+        this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+        this.$data.currentPdfFile = docProperties.documentName;
+        if (pageName === 'sign') {
+          Accessibility.setAccessibilityAttributesAfterPageLoad();
+          UtilityMethods.triggerEvent(this.updateAccessibleElements, {});
+        }
+      }, 100);
+    },
+
+    updateThumbnailFieldCount (pageIndex: number): void {
+      const context = this as any;
+      if (this.isThumbnailRendered) {
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        if (!thumbImageContainer.parentElement.classList.contains('enable-field-count')) {
+          thumbImageContainer.parentElement.classList.add('enable-field-count');
+        }
+        const fieldSpan: HTMLSpanElement = thumbImageContainer.nextElementSibling.children[0] as HTMLSpanElement;
+        const pageFormElement: PageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageIndex);
+        let fieldCount: number = 0;
+        if (pageFormElement && pageFormElement.formElements && pageFormElement.formElements.length > 0) {
+          fieldCount = pageFormElement.formElements.filter((formElement: FormElement) => formElement.id !== 'multipleSelection' && formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && (formElement.elementType !== 'checkbox' || (formElement.groupName === null)) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing)).length;
+          const checkboxElement = this.pdfFormElement.checkboxFieldCount();
+          fieldCount += checkboxElement.length > 0 ? checkboxElement.filter(x => x.pageIndex === pageIndex).length : 0;
+        }
+        if (fieldCount > 0) {
+          fieldSpan.innerText = fieldCount + (fieldCount > 1 ? ' ' + context.$t('common.fields') : ' ' + context.$t('common.field')) + ' ' + context.$t('common.added');
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    updatePageContent (documentProperties: DocumentProperties[]) {
+      const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+      const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+      this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+      for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+        const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+        this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+      }
+      this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+      this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+    },
+
+    updateFieldRelationId (fieldRelationId: any): void {
+      this.$data.fieldRelationId = fieldRelationId;
+    },
+
+    onPageChangeEvent (args: any, documentList: any): void {
+      if (this.isThumbnailRendered) {
+        UtilityMethods.scrollThumbImageToView(args.currentPageNumber, this.$data.thumbData);
+      }
+      if (!this.$data.showThumbContainer) {
+        this.$data.currentPage = args.currentPageNumber;
+        const totalPage = UtilityMethods.getPageCount(documentList);
+        if (this.$data.currentPage === 1) {
+          this.$data.disablePreviousPage = true;
+          this.$data.disableNextPage = false;
+        } else if (totalPage !== 1 && totalPage === args.currentPageNumber) {
+          this.$data.disableNextPage = true;
+          this.$data.disablePreviousPage = false;
+        } else {
+          this.$data.disableNextPage = false;
+          this.$data.disablePreviousPage = false;
+        }
+      }
+    },
+
+    updateThumbnailFieldCountSigningPage (pageIndex: number, formElements: FormElement[]): void {
+      if (this.isThumbnailRendered) {
+        const context = this as any;
+        const thumbImageContainer1: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        const status: string = this.getFiledFormElements(formElements);
+        const fieldSpan: HTMLSpanElement = thumbImageContainer1.nextElementSibling.children[0] as HTMLSpanElement;
+        const fieldCount: number = this.getTotalFieldCount(formElements);
+        if (status === 'success' && fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+
+          const filledCount: number = this.getFilledCount(formElements);
+          fieldSpan.innerText = filledCount + ' ' + context.$t('common.of') + ' ' + fieldCount + ' ' + context.$t('common.fields') + ' ' + context.$t('common.filled');
+        } else if (fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+          if (thumbImageContainer1.parentElement.classList.contains('enable-complete-container')) {
+            thumbImageContainer1.parentElement.classList.remove('enable-complete-container');
+          }
+          fieldSpan.innerText = status;
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer1.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    getFilledCount (formElements: FormElement[]): number {
+      let filledCount: number = 0;
+      for (let i = 0; i < formElements.length; i++) {
+        const formElement: FormElement = formElements[i];
+        if (formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && formElement.elementType !== 'formula' && formElement.elementType !== 'formula' && this.$data.fieldRelationId === formElement.signerId && formElement.visibility) {
+          if (formElement.isRequired && formElement.allowEditing) {
+            if (formElement.elementType === 'checkbox') {
+              if (formElement.value === 'on') {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'radiobutton') {
+              const filledChild = formElement.children.find((child: FormElement) => child.value === 'on');
+              if (filledChild) {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'attachment') {
+              if (formElement.attachmentDetails && formElement.attachmentDetails.length > 0) {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'textbox' && formElement.value) {
+              if (UtilityMethods.TextboxValidationType(formElement, formElement.value)) {
+                filledCount += 1;
+              }
+            } else if (formElement.value) {
+              filledCount += 1;
+            }
+          } else if (formElement.elementType === 'checkbox' && formElement.groupName) {
+            const checkboxGroupCount = this.pdfFormElement.getGroupCheckboxCount(formElement.groupName);
+            if (checkboxGroupCount === 1) {
+              filledCount += 1;
+            }
+          } else {
+            filledCount += 1;
+          }
+        }
+      }
+      filledCount += this.getGroupCheckboxFilledCount(formElements);
+      return filledCount;
+    },above code from thumbnail.vue
+
+
+[HttpPost("DeletePage")]
+[PolicyValidation(PolicyStatus = PolicyStatus.Internally)]
+public async Task<IActionResult> DeletePage([FromBody] DeletePageDetails deletePageDetails, CancellationToken token)
+{
+    try
+    {
+        var deletionResult = await this.pdfViewerService.DeletePage(deletePageDetails, token).ConfigureAwait(false);
+        if (deletionResult)
+        {
+            return this.Ok(new { success = true, message = "Page deleted successfully" });
+        }
+
+        return this.NotFound(new { success = false, message = "Page could not be deleted." });
+    }
+    catch (Exception ex)
+    {
+        return this.StatusCode(500, new { success = false, message = $"Internal server error: {ex.Message}" });
+    }
+}
+    
+  } above code from pdfviewerconroller class
+
+
+ public async Task<IActionResult> RenderThumbnail(ThumbnailDetails thumbnailDetails, CancellationToken token)
+    {
+    if (thumbnailDetails is null)
+    {
+        throw new ArgumentNullException(nameof(thumbnailDetails));
+    }
+
+    int pageNumber = thumbnailDetails.CurrentPageNumber;
+    string documentId = thumbnailDetails.DocumentId;
+    string parentId = thumbnailDetails.ParentDocumentId;
+    string baseContainerName = string.IsNullOrEmpty(parentId)
+      ? $"{documentId}-{DbConstants.Thumbnails}"
+      : $"{parentId}-{DbConstants.Thumbnails}";
+
+    // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+    var organizationId = thumbnailDetails.OrganizationId;
+    if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+    {
+      var docId = string.IsNullOrEmpty(parentId) ? documentId : parentId;
+      var documentDetailsCache = await this.GetDocumentDetailsCache(docId, this.httpContextAccessor.HttpContext)
+        .ConfigureAwait(false);
+      organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+    }
+
+    BlobContainerClient blobContainer =
+      await this.CloudStorage.GetContainer(baseContainerName, organizationId).ConfigureAwait(false);
+
+    string blobPath = string.IsNullOrEmpty(parentId)
+      ? $"{DbConstants.Thumbnail}-{pageNumber}.png"
+      : $"{documentId}/{DbConstants.Thumbnail}-{pageNumber}.png";
+
+    var blob = blobContainer.GetBlobClient(blobPath);
+
+    if (await blob.ExistsAsync().ConfigureAwait(false))
+    {
+      var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+      return new FileStreamResult(stream, "image/png")
+      {
+        FileDownloadName = blobPath,
+      };
+    }
+
+    return null;
+    }
+
+    /// <summary>
+    /// Removes a page from the specified PDF document.
+    /// </summary>
+    /// <param name="deletePageDetails">Details about the PDF document and the page to remove.</param>
+    /// <param name="token">The path where the modified PDF will be saved.</param>
+    /// <returns>True if the page was removed successfully, otherwise false.</returns>
+
+  public async Task<bool> DeletePage(DeletePageDetails deletePageDetails, CancellationToken token)
+  {
+    try
+    {
+        var organizationId = this.userDataService?.OrganizationId;
+        BlobContainerClient sourceBlobContainer = await this.CloudStorage.GetContainer(deletePageDetails.DocumentId, organizationId).ConfigureAwait(false);
+        var documentBlob = sourceBlobContainer.GetBlobClient(DbConstants.Document);
+        
+        // Download the document to a memory stream
+        MemoryStream documentStream = new MemoryStream();
+        await this.CloudStorage.DownloadToStreamAsync(documentBlob, documentStream, true, token).ConfigureAwait(false);
+
+        using (PdfLoadedDocument loadedDocument = new PdfLoadedDocument(documentStream))
+        {
+            // Ensure the page number is valid
+            if (deletePageDetails.SelectedPageNo < 0 || deletePageDetails.SelectedPageNo >= loadedDocument.Pages.Count)
+            {
+                Console.WriteLine("Invalid page number.");
+                return false;
+            }
+
+            // Remove the page
+            loadedDocument.Pages.RemoveAt(deletePageDetails.SelectedPageNo);
+
+            // Save the updated document to a memory stream
+            var downloadStream = new MemoryStream();
+            loadedDocument.Save(downloadStream);
+
+            // Upload the modified document back to blob storage
+            var updatedDocumentBlob = sourceBlobContainer.GetBlobClient($"{deletePageDetails.DocumentId}-{DbConstants.Document}");
+            downloadStream.Position = 0;  // Reset position before uploading
+            await this.CloudStorage.UploadFromStreamAsync(updatedDocumentBlob, downloadStream, true).ConfigureAwait(false);
+
+            Console.WriteLine($"Page {deletePageDetails.SelectedPageNo} removed successfully.");
+            return true;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error occurred: {ex.Message}");
+        return false;
+    }
+}
+ public async Task<string> Load(Dictionary<string, object> jsonObject, CancellationToken token)
+    {
+      string documentId = string.Empty;
+      string documentLoadDetails = string.Empty;
+      string documentPageDetails = string.Empty;
+      string scannedBlobName = string.Empty;
+      string signerId = string.Empty;
+
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      signerId = this.GetSignerId(jsonObject, this.httpContextAccessor.HttpContext);
+
+      if (string.IsNullOrEmpty(signerId))
+      {
+        throw new InvalidDataException(CommonResource.InvalidSignerId);
+      }
+
+      if (jsonObject.ContainsKey("document"))
+      {
+        documentLoadDetails = jsonObject["document"].ToString();
+      }
+      else if (jsonObject.ContainsKey("documentId") && string.IsNullOrEmpty(documentId))
+      {
+        documentLoadDetails = jsonObject["documentId"].ToString();
+      }
+
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+      scannedBlobName = isPrintSignDocument ? $"{DbConstants.ScannedDocument}/" : scannedBlobName;
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+        documentPageDetails = DbConstants.DocumentDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(documentLoadDetails);
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault().DocumentId : documentId;
+        documentPageDetails = isPrintSignDocument ? DbConstants.DocumentDetails : DbConstants.DocumentMergedDetails;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      BlobContainerClient blobContainer =
+        await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+      if (!await blobContainer.ExistsAsync().ConfigureAwait(false))
+      {
+        throw new InvalidDataException(CommonResource.InvalidDocumentId);
+      }
+
+      var blob = blobContainer.GetBlobClient($"{scannedBlobName}{documentPageDetails}");
+      var documentDetails = await this.CloudStorage.DownloadAsync<PdfViewerLoadDetails>(blob, false).ConfigureAwait(false);
+      documentDetails = this.AddUniqueIDToViewerLoadDetails(documentDetails, jsonObject);
+      documentDetails.SecretId = await this.secretkeyGenerationService.Generate(documentId, signerId).ConfigureAwait(false);
+      return documentDetails.ToNewsoftJson();
+    }
+
+    /// <inheritdoc/>
+    public async Task<byte[]> RenderPdfPages(Dictionary<string, object> jsonObject, BrowserType browserType, CancellationToken token)
+    {
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      int pageNumber = int.Parse(jsonObject["pageNumber"].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+      var intialPageNumber = pageNumber;
+      float scaleFactor = float.Parse(jsonObject["zoomFactor"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture);
+      string documentLoadDetails = jsonObject["documentId"].ToString();
+      string blobDirectoryName = string.Empty;
+      string documentId;
+      string scannedBlobName = string.Empty;
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(jsonObject["documentId"].ToString()); // JsonSerializer.Deserialize<DocumentProperties[]>(jsonObject["documentId"].ToString());
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault()?.DocumentId : documentId;
+        blobDirectoryName = GetBlobDirectoryName(ref pageNumber, viewerLoadDetails);
+      }
+
+      if (isPrintSignDocument)
+      {
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+        blobDirectoryName = string.Empty;
+        pageNumber = intialPageNumber;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      var blobContainer = await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+
+      var blobName = $"{scannedBlobName}{blobDirectoryName}{DbConstants.Page}-{pageNumber}-{scaleFactor}";
+      var webpBlobName = browserType switch
+      {
+        BrowserType.Chrome or BrowserType.Firefox or BrowserType.Edge => $"{blobName}-webp",
+        _ => blobName
+      };
+
+      var blob = blobContainer.GetBlobClient(webpBlobName);
+      PdfViewerImage imageDetails = null;
+      if (await blob.ExistsAsync(token).ConfigureAwait(false))
+      {
+        await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+        imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+      }
+      else
+      {
+        blob = blobContainer.GetBlobClient(blobName);
+        if (await blob.ExistsAsync(token).ConfigureAwait(false))
+        {
+          await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+          imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+        }
+      }
+
+      if (imageDetails == null)
+      {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+        imageDetails = await this.ExtractImageFromDocument(pageNumber, scaleFactor, blobDirectoryName, blobContainer, blob/*, token*/).ConfigureAwait(false);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+      }
+
+      return BinarySerializer.Serialize(this.AddUniqueIdToRenderImageDetails(imageDetails, intialPageNumber, jsonObject, scaleFactor));
+    }
+ above code are service method
+
+
+My task is to add trashicon near to pagecount in thumbnail in thumbnail vue.If i click trash icon the page of thumbnail and as well as page of PDF as to be delted dynamically what to do
