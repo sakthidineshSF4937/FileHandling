@@ -450,7 +450,9 @@ export default defineComponent({
       filledCount += this.getGroupCheckboxFilledCount(formElements);
       return filledCount;
     },above code from thumbnail.vue
-
+      deletePage ({ data }: ApiParamsType) {
+        return $axios.post('/api/PdfViewer/DeletePage', data);
+      } above code from index.ts
 
 [HttpPost("DeletePage")]
 [PolicyValidation(PolicyStatus = PolicyStatus.Internally)]
