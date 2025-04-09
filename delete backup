@@ -1,0 +1,1566 @@
+<template>
+  <div id="pdfViewer_parent" tabindex="0" style="height: 100%; position: relative; float: left; cursor: move;">
+    <ejs-pdfviewer
+      id="pdfviewer"
+      ref="pdfObj"
+      :serviceUrl="serviceUrl"
+      :documentLoad="pdfDocumentLoad"
+      :zoomChange="pdfZoomChange"
+      :pageChange="pdfPageChange"
+      :tileRenderingSettings="tileRenderingSettings"
+      :ajaxRequestSettings="ajaxRequestSettings"
+      :ajaxRequestInitiate="ajaxRequestInitiate"
+      :ajaxRequestSuccess="ajaxRequestSuccess"
+      :ajaxRequestFailed="ajaxRequestFailed"
+      :showNotificationDialog="false"
+      :restrictZoomRequest="false"
+    />
+    <ejs-tooltip v-if="showZoomOption && isDesktopMode" ref="zoomTooltipObj" :beforeRender="onZoomTooltipOpen" position="RightCenter" target="span">
+      <div class="bs-pdf-zoom-style">
+        <span id="zoomIn" class="sf-icon-Zoomin" @click="zoomIn" ></span>
+        <span id="zoomOut" class="sf-icon-Zoomout" @click="zoomOut" ></span>
+        <span id="fullScreen" class="sf-icon-Fit" @click="fullScreen" ></span>
+      </div>
+    </ejs-tooltip>
+    <PDFViewerFailedDialog ref="pdfViewerFailedDialogObj" :isFromDefaultPage="false" />
+  </div>
+</template>
+<script lang="ts">
+import { defineComponent, PropType } from 'vue';
+import { TooltipComponent } from '@syncfusion/ej2-vue-popups';
+import { PdfViewerComponent, Magnification, Navigation, PageChangeEventArgs, ZoomChangeEventArgs, PdfViewer } from '@syncfusion/ej2-vue-pdfviewer';
+import { decode } from '@msgpack/msgpack';
+import { UtilityMethods } from '../types/util';
+import { PageType, ResponsiveMode } from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import PDFViewerFailedDialog from '../components/pdfviewer-fail-dialog.vue';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+
+export default defineComponent({
+  name: 'PdfViewerRenderComponent',
+  components: {
+    'ejs-pdfviewer': PdfViewerComponent,
+    PDFViewerFailedDialog,
+    'ejs-tooltip': TooltipComponent
+  },
+
+  provide: {
+    PdfViewer: [Magnification, Navigation]
+  },
+  props: {
+    pageType: {
+      type: String as PropType<PageType>,
+      required: true
+    },
+    isPreviewPage: Boolean,
+    isPreviewTemplatePage: Boolean,
+    showZoomOption: Boolean,
+    isSigningPage: Boolean,
+    isLatestVersion: Boolean
+  },
+
+  emits: [
+    'drop',
+    'keydown',
+    'selectionChange',
+    'tabIndexChange',
+    'dropdownFocusOut',
+    'indexPositionChange',
+    'showSignatureInstance',
+    'formElementDragStart',
+    'formElementDragEnd',
+    'textChange',
+    'collectionChange',
+    'positionChange',
+    'sizeChange',
+    'formElementMouseOver',
+    'formElementMouseLeave',
+    'conditionalLogicSelectionChange',
+    'editAccessForFieldsInFormula',
+    'pdfDocumentLoad',
+    'pdfZoomChange',
+    'pdfPageChange',
+    'editFormElementsOnEnter',
+    'formElementInputChange',
+    'fontSizeChangeOnResize'
+  ],
+
+  data () {
+    // PdfViewer.Inject(Magnification, Navigation);
+    let serviceUrl = '/api/pdfviewer';
+    if (this.$session.embedData.isEmbedPage) {
+      serviceUrl = '/api/embeddedRequest';
+    } else if (this.$route.path.indexOf('configure-custom-field') > 0) {
+      const embeddedBrandDetails = UtilityMethods.getCustomFieldBrandAndEmbedIds(this.$route.query.brandId.toString());
+      if (embeddedBrandDetails.embedId) {
+        this.$mutation.updateCustomFieldData({ embeddedCustomFieldId: embeddedBrandDetails.embedId });
+        serviceUrl = '/api/embeddedCustomField';
+      } else {
+        serviceUrl = '/api/customField';
+      }
+    }
+    const canDisplayAIIcon = UtilityMethods.canEnableAIFieldDetection(this);
+    const PdfFormElement: PdfFormElements = new PdfFormElements(this.pageType, this.isPreviewPage, canDisplayAIIcon);
+    return {
+      isInit: false,
+      pdfViewerFailedDialogInstance: null,
+      PdfFormElement,
+      pdfViewer: PdfViewerComponent,
+      zoomFactor: 1.5,
+      serviceUrl,
+      tileRenderingSettings: { enableTileRendering: false },
+      ajaxRequestSettings: { ajaxHeaders: [{ headerName: 'x-xsrf-token', headerValue: this.$main.xsrfToken }] },
+      secretId: '',
+      isDesktopMode: this.$session.responsiveLayout.responsiveMode === ResponsiveMode.DesktopMode
+    };
+  },
+
+  mounted () {
+    this.$data.pdfViewerFailedDialogInstance = this.$refs.pdfViewerFailedDialogObj;
+    if (this.$refs.pdfObj) {
+      this.$data.PdfFormElement.pdfInstance = this.$refs.pdfObj.ej2Instances;
+      this.$data.PdfFormElement.drop = this.drop.bind(this);
+      this.$data.PdfFormElement.selectionChange = this.selectionChange.bind(this);
+      this.$data.PdfFormElement.tabIndexChange = this.tabIndexChange.bind(this);
+      this.$data.PdfFormElement.indexPositionChange = this.indexPositionChange.bind(this);
+      this.$data.PdfFormElement.dragStart = this.formElementDragStart.bind(this);
+      this.$data.PdfFormElement.dragEnd = this.formElementDragEnd.bind(this);
+      this.$data.PdfFormElement.dropdownFocusOut = this.dropdownFocusOut.bind(this);
+      this.$data.PdfFormElement.collectionChange = this.collectionChange.bind(this);
+      this.$data.PdfFormElement.positionChange = this.positionChange.bind(this);
+      this.$data.PdfFormElement.sizeChange = this.sizeChange.bind(this);
+      this.$data.PdfFormElement.textChange = this.textChange.bind(this);
+      this.$data.PdfFormElement.mouseover = this.formElementMouseOver.bind(this);
+      this.$data.PdfFormElement.mouseleave = this.formElementMouseLeave.bind(this);
+      this.$data.PdfFormElement.conditionalLogicSelectionChange = this.conditionalLogicSelectionChange.bind(this);
+      this.$data.PdfFormElement.showSignatureInstance = this.showSignatureInstance.bind(this);
+      this.$data.PdfFormElement.keydown = this.keydown.bind(this);
+      this.$data.PdfFormElement.editFormElementsOnEnter = this.editFormElementsOnEnter.bind(this);
+      this.$data.PdfFormElement.formElementInputChange = this.formElementInputChange.bind(this);
+      this.$data.PdfFormElement.editAccessForFieldsInFormula = this.editAccessForFieldsInFormula.bind(this);
+      this.$data.PdfFormElement.fontSizeChangeOnResize = this.fontSizeChangeOnResize.bind(this);
+    }
+    window.onresize = this.windowResize.bind(this);
+    this.pdfViewer = this.$refs.pdfObj as PdfViewerComponent;
+    if (this.pdfViewer) {
+      this.$data.pdfViewer.ej2Instances.scrollSettings = { delayPageRequestTimeOnScroll: 500 };
+      this.$data.pdfViewer.ej2Instances.beforeRenderPdfPage = this.pageRenderInitiate.bind(this);
+    }
+  },
+
+  methods: {
+    drop (args: any): void {
+      this.$emit('drop', args);
+    },
+
+    keydown (args: any): void {
+      this.$emit('keydown', args);
+    },
+
+    selectionChange (args: any): void {
+      this.$emit('selectionChange', args);
+    },
+
+    tabIndexChange (): void {
+      this.$emit('tabIndexChange');
+    },
+
+    dropdownFocusOut (args: any): void {
+      this.$emit('dropdownFocusOut', args);
+    },
+
+    indexPositionChange (args: any): void {
+      this.$emit('indexPositionChange', args);
+    },
+
+    showSignatureInstance (): void {
+      this.$emit('showSignatureInstance');
+    },
+
+    formElementDragStart (): void {
+      this.$emit('formElementDragStart');
+    },
+
+    formElementDragEnd (args: any): void {
+      this.$emit('formElementDragEnd', args);
+    },
+
+    textChange (args: any): void {
+      this.$emit('textChange', args);
+    },
+
+    fontSizeChangeOnResize (args: any) {
+      this.$emit('fontSizeChangeOnResize', args);
+    },
+
+    collectionChange (args: any): void {
+      this.$emit('collectionChange', args);
+    },
+
+    positionChange (args: any): void {
+      this.$emit('positionChange', args);
+    },
+
+    sizeChange (args: any): void {
+      this.$emit('sizeChange', args);
+    },
+
+    formElementMouseOver (args: any): void {
+      this.$emit('formElementMouseOver', args);
+    },
+
+    formElementMouseLeave (): void {
+      this.$emit('formElementMouseLeave');
+    },
+
+    conditionalLogicSelectionChange (args: any): void {
+      this.$emit('conditionalLogicSelectionChange', args);
+    },
+
+    editAccessForFieldsInFormula (args: any): void {
+      this.$emit('editAccessForFieldsInFormula', args);
+    },
+
+    pdfDocumentLoad (args: any): void {
+      this.isInit = true;
+      this.$emit('pdfDocumentLoad', args);
+    },
+
+    ajaxRequestSuccess (args: any) {
+      if (args.data && args.data.secretId) {
+        this.$data.secretId = args.data.secretId;
+        this.$mutation.updateMainData({ secretId: this.$data.secretId });
+      }
+    },
+
+    pdfZoomChange (args: ZoomChangeEventArgs): void {
+      if (this.isInit) {
+        this.PdfFormElement.scaleFormContainer(args.zoomValue);
+      }
+      this.$emit('pdfZoomChange');
+    },
+
+    pdfPageChange (args: PageChangeEventArgs): void {
+      this.$emit('pdfPageChange', args);
+    },
+
+    editFormElementsOnEnter (args: any): void {
+      this.$emit('editFormElementsOnEnter', args);
+    },
+
+    formElementInputChange (args: any): void {
+      this.$emit('formElementInputChange', args);
+    },
+
+    ajaxRequestInitiate (args: any): void {
+      this.pdfViewer.ej2Instances.ajaxRequestSettings.ajaxHeaders[0].headerValue = this.$main.xsrfToken;
+      this.pdfViewer.ej2Instances.httpResponseType = null;
+      const embedData: any = this.$session.embedData;
+      const mainData: any = this.$session.mainData;
+      if (args.JsonData.action === 'RenderPdfPages' || args.JsonData.action === 'Load' || args.JsonData.action === 'VirtualLoad' || args.JsonData.action === 'RenderTaggedContent') {
+        if (embedData.isEmbedPage) {
+          args.JsonData.signerId = embedData.embedId;
+          args.JsonData.documentIdData = embedData.documentId;
+          args.JsonData.embedId = embedData.embedId;
+          args.JsonData.organizationId = embedData.organizationId;
+        } else {
+          args.JsonData.signerId = mainData.currentUserId ? mainData.currentUserId : mainData.currentSignerId;
+        }
+        if (this.$session.mainData.signbuilderType === 'usetemplate') {
+          args.JsonData.templateId = this.$session.mainData.useTemplateDocumentId;
+        }
+        if (mainData.isEditCreatedTemplate) {
+          args.JsonData.templateId = mainData.editTemplateDocumentId;
+        }
+        if (this.isPreviewTemplatePage && this.$route.query.templateId) {
+          args.JsonData.templateId = this.$route.query.templateId.toString();
+        }
+        if (this.$session.mainData.signbuilderType === 'bulksend') {
+          args.JsonData.templateId = this.$session.bulkSendData.templateId;
+        }
+        if (this.$session.mainData.signbuilderType === 'createlink' || this.$session.mainData.isViewBulkLinkPage) {
+          args.JsonData.isLinkForms = true;
+          args.JsonData.linkId = mainData.editBulklinkId;
+        }
+        if (UtilityMethods.inEditMode(this) && !mainData.anySignerCompleted) {
+          args.JsonData.editDocumentId = mainData.editDocumentId;
+        }
+      }
+      if (args.JsonData.action === 'RenderPdfPages') {
+        if (this.isLatestVersion) {
+          args.JsonData.zoomFactor = this.$data.zoomFactor;
+        }
+        args.JsonData.secretId = this.$data.secretId;
+        this.pdfViewer.ej2Instances.httpResponseType = 'arraybuffer';
+        if (args.JsonData.zoomFactor === this.PdfFormElement.currentZoom) {
+          // this.updateFieldDisplay(args.JsonData.pageNumber, 'none');
+        }
+      }
+      if (args.JsonData.action === 'RenderTaggedContent') {
+        args.JsonData.secretId = this.$data.secretId;
+      }
+      if (this.pageType === 'EDIT') {
+        args.JsonData.isPrintSignDocument = true;
+        this.pdfViewer.setJsonData(args.JsonData);
+      }
+    },
+
+    pageRenderInitiate (args) {
+      const buffer = args.JsonData;
+      const obj = decode(buffer) as any;
+      obj.image = 'data:image/png;base64,' + this.arrayBufferToBase64(obj.image);
+      args.JsonData = obj;
+      args.JsonData.transformationMatrix = {
+        Elements: [1, 0, 0, 1, 0, 0],
+        OffsetX: 0,
+        OffsetY: 0,
+        IsInvertible: true,
+        IsIdentity: true
+      };
+      // this.updateFieldDisplay(args.JsonData.pageNumber, 'block');
+      this.pdfViewer.ej2Instances.renderPdfPages(args.JsonData);
+    },
+
+    arrayBufferToBase64 (buffer) {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return window.btoa(binary);
+    },
+above code pdf render vue file
+
+
+
+    loadPdf (): void {
+      const pdfViewer: PdfViewerComponent = this.pdfRenderInstance.pdfViewer as PdfViewerComponent;
+      const documentProperties: DocumentProperties[] = this.jsonDocumentContent.documentDetails.documentProperties;
+      if (this.currentSigner && this.currentSigner.signerAuthType === 'IdentityVerification') {
+        this.extendSessionInterval();
+        if (this.$data.isIdVerificationTrackingReq) {
+          this.checkIsValidSession();
+        }
+      }
+      if (documentProperties && (documentProperties.length > 1 || (documentProperties.length === 1 && documentProperties[0].parentId))) {
+        pdfViewer.load(UtilityMethods.deleteDocumentName(documentProperties), null);
+      } else {
+        pdfViewer.load(this.jsonDocumentContent.id, null);
+      }
+    }
+
+getDocumentAndSignatureDetails (): void {
+      const documentId = this.$route.query.documentId.toString();
+      if (!documentId) {
+        this.$data.accessDenied = true;
+      } else {
+        this.$nuxt.$api.viewPage.getDocumentDetails(documentId).then((data) => {
+          if (data === 'authenticationFailed') {
+            this.$data.accessDenied = true;
+            this.$data.accessDeniedInfo = (this as any).this.$t('signPage.authFailedInfo');
+          } else if (data.returnPage) {
+            this.$data.defaultBrandUrl = data.brandLogoImage;
+            this.setReturnPage(data.returnPage, data.idVerificationNameError);
+          } else if (data && data.preventDocumentViewing) {
+            if (data.inEditingMode) {
+              this.$data.documentEditInitiated = true;
+            } else {
+              this.$data.accessDenied = true;
+              this.$data.accessDeniedInfo = (this as any).this.$t('viewPage.canViewDocumentInfo');
+              if (data.isRevoked) {
+                this.$data.accessDeniedInfo = (this as any).this.$t('signPage.documentRevokeInfo');
+              }
+            }
+          } else if (data.isLinkExpired) {
+            this.$data.singerIdExpiredVisible = true;
+          } else {
+            const viewDocumentContent = this.jsonDocumentContent = data.viewDocumentContent;
+            this.$data.isLatestVersion = UtilityMethods.isLatestVersionedDocument(this.jsonDocumentContent.documentDetails.documentVersion);
+            this.currentSigner = viewDocumentContent.currentSigner;
+            if (viewDocumentContent.enableToast) {
+              const toastObj = this.getFailureCustomToast();
+              let headerText = '';
+              if (this.currentSigner) {
+                if (this.currentSigner.signerName) {
+                  headerText = this.currentSigner.signerName;
+                } else {
+                  headerText = this.currentSigner.signerType === 2 ? this.$t('viewPage.alreadyReviewed') : this.$t('viewPage.alreadySigned');
+                }
+              }
+              if (viewDocumentContent.documentStatus === 'Declined' && (!viewDocumentContent.declinerName || viewDocumentContent.declinerName === 'You')) {
+                headerText = this.$t('viewPage.alreadyDecline');
+              } else if (viewDocumentContent.documentStatus === 'Revoked' && viewDocumentContent.declinerName) {
+                headerText = this.$t('viewPage.alreadyRevoked', { signerName: viewDocumentContent.declinerName });
+              } else if (viewDocumentContent.documentStatus === 'Declined' && viewDocumentContent.declinerName) {
+                headerText = this.$t('viewPage.alreadyDeclineByOthers', { signerName: viewDocumentContent.declinerName });
+              } else if (viewDocumentContent.documentStatus === 'Expired') {
+                headerText = this.$t('viewPage.documentExpired', { signerName: viewDocumentContent.declinerName });
+              }
+              toastObj.show(headerText, 'bs_toast_success', 'sf-icon-Information', null, 0, true);
+            }
+            this.$data.enableDocumentID = this.jsonDocumentContent.enableDocumentID;
+            this.$data.enableWaterMark = this.jsonDocumentContent.enableWaterMark;
+            this.$data.messageTitle = this.$data.pageTitleName = this.jsonDocumentContent.documentDetails.messageTitle;
+            const brandImageUrl = this.jsonDocumentContent.brandLogoImage;
+            if (brandImageUrl) {
+              this.$data.defaultBrandUrl = brandImageUrl;
+            } else {
+              this.$data.defaultBrandUrl = this.$data.brandUrl;
+            }
+            const documentStatus: string = this.jsonDocumentContent.documentDetails.status;
+            this.$data.documentStatus = documentStatus === 'InProgress' ? this.$t('viewPage.inProgressDocStatus') : documentStatus;
+            if (!this.$data.signerId && this.currentSigner) {
+              this.$data.signerId = this.currentSigner.signerId;
+            }
+            // this.$userInsight.identifyAndCapturePosthog(this.currentSigner, this.$data.isLogInUser);
+            if (this.jsonDocumentContent.allowSigning && this.jsonDocumentContent.isAuthorizedSigner) {
+              this.$data.authenticationVisible = true;
+              document.getElementById('prepareProgress').style.display = 'none';
+            } else {
+              this.$data.isIdVerificationTrackingReq = data.isTrackingRequired;
+              this.extendSessionCount = this.$data.idVerificationSessionInterval = data.idVerificationSessionInterval - 10;
+              this.loadPdf();
+            }
+            this.moreInfoInstance.setData(this.jsonDocumentContent);
+          }
+        }).catch((e: any) => {
+          this.$data.accessDenied = true;
+          this.$data.accessDeniedInfo = this.$t('accessDeniedPage.signOrViewPageLoadFailedInfo');
+          if (e.response && e.response.data && e.response.data.error) {
+            const errorMessages = {
+              SubscriptionPaused: 'signPage.subscriptionPaused',
+              PAYGDisabled: 'signPage.paygDisabled',
+              BudgetReached: 'signPage.idVerificationBudgetExceeded',
+              NameNotMatched: 'viewPage.idVerificationNameFailedInfo'
+            };
+            this.$data.accessDeniedInfo = (this as any).this.$t(errorMessages[e.response.data.error] || 'accessDeniedPage.signOrViewPageLoadFailedInfo');
+          }
+        });
+      }
+    },
+pdfPageChange (args: PageChangeEventArgs): void {
+      this.$data.pdfFormElement.selectedPageIndex = args.currentPageNumber;
+      this.$data.thumbnailInstance.onPageChangeEvent(args, this.jsonDocumentContent.documentDetails.documentProperties);
+    }
+pdfDocumentLoad (args: any): void {
+      const documentProperties: DocumentProperties[] = this.jsonDocumentContent.documentDetails.documentProperties;
+      this.$data.pdfFormElement.initDroppableElement(this.$data.documentId, UtilityMethods.getPageCount(documentProperties), args.pageData, this.$data.enableDocumentID, this.$data.enableWaterMark);
+      UtilityMethods.updateZoomProperties(this.$data.isLatestVersion, this.$data.pdfFormElement.pdfInstance);
+      this.isInit = true;
+      this.loadDocumentFields();
+    }
+<template>
+  <div :class="renderingMode +' bs-signing-page bs-view-mobile-mode-page'" style="width: 100%; height: 100%;">
+    <div class="bs-signer-view-header" style="border-bottom: 1px solid #CBD5E0; position: relative">
+      <div v-if="defaultBrandUrl" class="bs-logo-container" style="float:left; display: flex; align-items: center;" :style="{ width: isDesktopMode ? '148px' : '90px', height: isDesktopMode ? '36px' : '46px', lineHeight: isDesktopMode ? '36px' : '50px' }">
+        <a href="/" :tabindex="0">
+          <img :src="defaultBrandUrl" :class="isDesktopMode ? 'bs-brand-logo-preview desktop-logo' : 'bs-brand-logo-preview mobile-logo'"/>
+        </a>
+      </div>
+      <div class="bs-document-text-container" style="float:left; text-overflow: ellipsis; white-space: nowrap; overflow: hidden;">
+        <div class="bs-signer-view-text bs-viewer-title-width" style="width: 96%; text-align: center;line-height: 30px;display: flex; align-items: center;">
+          <span id="documentName" class="view-header-doc-name" :style="{ borderLeft: defaultBrandUrl && isDesktopMode ? '1px solid #D2D7DE' : '0px solid' }" style="font-size: 16px; letter-spacing: 0.32px;float: left; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">{{ messageTitle }}</span>
+          <span v-if="documentStatus" id="documentStatus" style="border-radius: 5px; background-color: #e9ebee; color: #0f4726; font-size: 12px; font-weight: 500; margin-left: 5px; margin-right: 5px; padding: 0px 10px; float: left;">{{ documentStatus }}</span>
+        </div>
+      </div>
+      <div :style="{ float: 'right', width: 'auto' }">
+        <div id="moreActionContainer" :style="{ marginRight: '10px' }">
+          <ejs-dropdownbutton :tabindex="1" :items="moreActions" :iconCss="moreOptionIcon" :select="moreOptionSelect" :content="moreActionContent" />
+        </div>
+        <div v-if="isLogInUser" class="bs-signer-view-text bs-signer-icon" :tabindex="2" @keydown="closeButtonClick">
+          <ejs-tooltip position="BottomCenter" :content="closeActionTooltip">
+            <span class="sf-icon-Close" style="cursor:pointer;line-height:32px;padding: 6px; border-radius: 50%;" @click="closeButtonClick" ></span>
+          </ejs-tooltip>
+        </div>
+      </div>
+    </div>
+    <div class="bs-signer-view-content" :style="{ width: '100%', border: 'none' }">
+      <PDFViewerRenderComponent
+        ref="pdfRenderObj"
+        pageType="VIEW"
+        :showZoomOption="true"
+        :style="{ width: showThumbContainer ? 'calc(100% - 250px)' : '100%' }"
+        :isLatestVersion="isLatestVersion"
+        @pdfDocumentLoad="pdfDocumentLoad"
+        @pdfPageChange="pdfPageChange"
+        @selectionChange="selectionChange"
+        @formElementMouseOver="formElementMouseOver"
+        @formElementMouseLeave="formElementMouseLeave"
+      />
+      <ThumbnailComponent id="bs-thumbnail-view" ref="thumbnailObj" @showThumb="showThumb" />
+    </div>
+    <HyperlinkWarning ref="hyperLinkWarningObj" pageType="VIEW" />
+
+    <ejs-dialog
+      id="revokeDialog"
+      :closeOnEscape="closeOnEscape"
+      cssClass="bs-dialog-style bs-responsive-mobile"
+      :width="dialogWidth"
+      :showCloseIcon="true"
+      :isModal="signModal"
+      :close="dialogClose"
+      :animationSettings="animationSettings"
+      :visible="revokeDialogVisible"
+      :target="target"
+      :buttons="revokeButtons"
+    >
+      <div style="padding: 0 0 16px 0px;">
+        <div style="float:left; line-height: 30px;">
+          <img src="../static/info-alert.svg" :alt="trulliAltText" width="24" height="24"/>
+        </div>
+        <div style="line-height: 34px; font-size: 20px; letter-spacing: 0.32px; margin-left: 40px;font-weight: 500;">
+          Revoke document
+        </div>
+      </div>
+      <div class="bs-decline-content" style="width: 100%; min-height: 138px">
+        <span style="height: 20px; padding: 5px">{{ $t('signPage.revokeWarningMessgae') }}</span>
+        <ejs-textbox v-model="revokeMessage" :multiline="true" :placeholder="revokeReasonPlaceholder" :value="revokeMessage" />
+        <span class="bs-revoke-validation-text" :style="{ display: isInvalidRevokedMessage ? 'block' : 'none' }">{{ $t('signPage.revokeReasonRequired') }}</span>
+        <span class="bs-note-style" style="margin-top: 15px;">{{ $t('signPage.revokeDialogNotes') }}</span>
+      </div>
+    </ejs-dialog>
+    <MoreInfoComponent ref="moreInfoObj" />
+    <ejs-dialog
+      id="deleteDialog"
+      :closeOnEscape="closeOnEscape"
+      :width="dialogWidth"
+      :showCloseIcon="true"
+      :close="dialogClose"
+      cssClass="bs-responsive-mobile"
+      :isModal="signModal"
+      :animationSettings="animationSettings"
+      :visible="deleteDialogVisible"
+      :target="target"
+      header="Delete document"
+      :buttons="deleteButtons"
+    >
+      <div class="bs-delete-content">
+        <span>{{ $t('viewPage.deleteWarningMessgae') }}</span>
+      </div>
+    </ejs-dialog>
+    <custom-modal
+      ref="this.deleteConfirmDialog"
+      :show.sync="showDeleteConfirmationDialog"
+      :styles="{ width: '450px' }"
+      :showButtons="true"
+      :primaryButton="$t('viewPage.yesDelete')"
+      :secondaryButton="$t('viewPage.cancel')"
+      cssClass="confirm-delete-dialog custom_del_col"
+      @primaryClick="permanentDeleteYesClick"
+      @secondaryClick="showDeleteConfirmationDialog = false"
+    >
+      <div class="flex-items">
+        <div class="warning-gradient-bg" ></div>
+        <div class="text-content-style">
+          {{ $t('viewPage.confirmPermanentDelete') }}
+        </div>
+      </div>
+    </custom-modal>
+    <ejs-dialog
+      id="reloadDocumentDialog"
+      :closeOnEscape="reloadDocumentEscape"
+      :width="reloadDocumentDialogWidth"
+      :showCloseIcon="reloadDocumentCloseIcon"
+      :isModal="signModal"
+      :animationSettings="animationSettings"
+      :target="target"
+      :visible="reloadDocumentDialogVisible"
+      :buttons="reloadDocumentDialogButtons"
+      cssClass="bs-responsive-mobile"
+    >
+      <div style="width: 100%; padding:24px;">
+        <div style="float:left; margin-right:16px;">
+          <img src="../static/warning-1.svg" width="24" height="24"/>
+        </div>
+        <span class="bs-reloadDocument-text-style" style="margin-top:2px; display:block; margin-left: 42px;">{{ $t('signPage.reloadDocumentDialogText') }}</span>
+      </div>
+    </ejs-dialog>
+    <ejs-dialog
+      id="signerIdExpiredDialog"
+      width="400px"
+      :showCloseIcon="false"
+      :isModal="signModal"
+      :animationSettings="animationSettings"
+      :target="target"
+      :visible="singerIdExpiredVisible"
+      :closeOnEscape="false"
+    >
+      <div style="width:100%; padding:0px 8px; height: auto;">
+        <div style="float:left; margin-right:16px;">
+          <img src="../static/warning.svg" width="40" height="40"/>
+        </div>
+        <div style="float:left; height:40px; width: calc(100% - 56px); display:table">
+          <span style="font-size:14px; font-weight:400;display:table-cell;vertical-align:middle">{{ $t('signPage.signLinkExpiredMessage', { pageName: 'view' }) }}</span>
+        </div>
+        <div v-if="isClickOnce && !isResendClicked" class="bs-link-add-info-container" style="float:left; height:30px;">
+          <span class="bs-link-add-info">{{ $t('signPage.dialogResendLinkText') }}</span>
+          <span class="bs-link-add-info bs-hyperlink-resend-style" style="font-weight:500" @click="resendViewLink">{{ $t('signPage.resendLinkText') }}</span>
+        </div>
+        <div v-if="!isClickOnce" class="bs-link-add-info-container" style="float:left; height:30px;">
+          <span class="bs-link-add-info bs-hyperlink-resend-style" @click="generateNewLink" style="font-weight:500">{{$t('signPage.generateLinkText')}}</span>
+        </div>
+      </div>
+    </ejs-dialog>
+    <CustomToast ref="successCustomToast" @onCustomToastClose="onToastClose" />
+    <CustomToast ref="failureCustomToast" />
+    <CustomToast ref="attachmentToast" />
+    <div id="viewProgress" class="sb-content-overlay" :style="{ display: showProgress ? 'block' : 'none' }">
+      <img src="../static/loader.svg" :alt="trulliAltText" width="48" height="48" style="position: absolute;top: calc(50% - 24px);left: calc(50% - 24px);"/>
+    </div>
+    <div id="prepareProgress" class="v-sb-content-overlay">
+      <SignEnterTemplate />
+    </div>
+    <div class="access-content-overlay" :style="{ display: accessDenied ? 'block' : 'none' }">
+      <AccessDocumentDeniedTemplate :accessDeniedInfo="accessDeniedInfo" :accessDeniedHeader="accessDeniedHeader" />
+    </div>
+    <div v-show="documentEditInitiated" class="access-content-overlay">
+      <SigningRestrictedPage />
+    </div>
+    <identity-verification ref="identityVerification" :authenticator="getAuthenticator('IdVerification')" />
+    <invalid-previous-session ref="invalidPreviousSession" />
+    <verification-in-progress ref="verificationInProgress" />
+    <id-verification-session-expired ref="idVerificationSessionExpired" />
+  </div>
+</template>
+above code from view. vue file
+
+<template>
+  <div style="height: 100%">
+    <div class="bs-thumb-container-body" :style="{ display: 'block', overflow: 'hidden', height: '100%' }">
+      <div class="show-thumb-content" :style="{ right : !disableThumbContainer && !showThumbContainer ? '0px' : isMobileMode ? '200px' : '220px', display: isResponsiveLayout() ? 'block': 'none'}">
+        <div :style="{ display : !showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="showThumbTooltip" :content="showThumbnailsTooltipContent">
+            <ejs-button :iconCss="expandPanelIcon" style="width:32px;" @click="showOrHideThumbContainer" />
+          </ejs-tooltip>
+        </div>
+        <div :style="{ display : showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="hideThumbTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+            <span :class="collapsePanelIcon + ' header-icon'" @click="showOrHideThumbContainer" ></span>
+          </ejs-tooltip>
+        </div>
+        <div class="show-page-navigation">
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnail') }}</span>
+        </div>
+      </div>
+      <div id="thumbnailContainer" :class="'bs-thumb-container' + thumbState" :style="{ display : !disableThumbContainer && showThumbContainer ? 'block' : 'none', height: getThumbHeight() }">
+        <div class="bs-thumbnail-images-container">
+          <div class="bs-thumbnail-header">
+            <div class="bs-thumbnail-tooltip-container">
+              <ejs-tooltip ref="thumbnailTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+                <span
+                  id="thumbnailsHeader"
+                  :tabindex="0"
+                  role="button"
+                  :class="collapsePanelIcon + ' header-icon'"
+                  :aria-label="hideThumbnailsTooltipContent"
+                  @click="showOrHideThumbContainer"
+                  @keydown.enter="showOrHideThumbContainer"
+                ></span>
+              </ejs-tooltip>
+              <span class="header-text" style="margin-left: 8px; padding-top: 2px;">{{ $t('thumbnailComponent.thumbnail') }}</span>
+            </div>
+            <ejs-tooltip
+              ref="thumbnailHeadingToolTip"
+              :content="thumbnailDocHeading"
+              cssClass="tooltip-max-width"
+              target=".pdf-file-indicator"
+              width="auto"
+              style="display: inline-flex; overflow: hidden;"
+            >
+              <div id="thumbnailFileName">
+                <span id="thumbnailPdfFileIndicator" class="pdf-file-indicator" style="display: inline-block; float: left; width:auto;">{{ thumbnailDocHeading }}</span>
+                <span style="display: inline-block;font-size: 12px;float: left;margin: 10px 0px 0px 4px; color: #666e80;min-width: 72px;">{{ thumbnailDocPageCount }}</span>
+              </div>
+            </ejs-tooltip>
+          </div>
+          <div id="thumbnailBody" class="bs-thumbnail-body" @scroll="thumbScrollChange">
+            <div v-for="(thumbnail, index) in thumbData" :key="thumbnail.pageId">
+              <div v-if="thumbnail.isFirstPage && currentPdfFile !== thumbnail.documentName" id="thumbnailBodyPdfFileIndicator" class="pdf-file-indicator">
+                <ejs-tooltip :content="thumbnail.documentName" width="auto" maxWidth="120px" style="display: inline-flex; overflow: hidden;" cssClass="tooltip-max-width">
+                  <span class="document-name-tooltip" style="display: inline-block;width: auto;float: left;text-overflow: ellipsis;overflow: hidden;white-space: nowrap; font-weight: 500;">{{ thumbnail.documentName }}</span>
+                </ejs-tooltip>
+                <span style="display: inline-block;font-size: 12px;float: left;color: rgb(102, 110, 128);max-width: 72px;margin-left: 4px;font-weight: 400;">
+                  {{ thumbnail.pageCount > 1 ? $t('thumbnailComponent.thumbnailPageCount', { pageCount: thumbnail.pageCount }) : $t('thumbnailComponent.thumbnailSinglePage', { pageCount: thumbnail.pageCount }) }}
+                </span>
+              </div>
+              <div v-show="thumbnail.source" :id="'thumbnail_' + (thumbnail.uniqueId)" align="center" style="padding-top:14px">
+                <div class="bs-thumb-content-container">
+                  <div :id="'thumbImageContainer_' + (index + 1)" class="bs-thumb-image-container" :tabindex="100 + index" style="outline: none;" @click="navigatePageFromThumbnail(index+1)">
+                    <img :src="thumbnail.source" style="width:100%; height: 155px; border-radius: 4px; pointer-events: none" :alt="thumbnailAlt" @load="imgLoad"/>
+                  </div>
+                  <div class="bs-thumb-border-container">
+                    <span class="field-count-span" ></span>
+                  </div>
+                  <div class="bs-thumb-complete-container">
+                    <span class="sf-icon-Tick" ></span>
+                  </div>
+                </div>
+                <!-- <div style="margin-top: 8px; height: 18px; width: 100%; display: table">
+                  <span style="display:table-cell; vertical-align:middle; text-align: center">{{ index + 1 }}</span>
+                </div> -->
+                <div style="margin-top: 8px; height: 18px; width: 100%; display: flex; justify-content: center; align-items: center; gap: 8px;">
+               <span>{{ index + 1 }}</span>
+               <span class="sf-icon-Delete" style="cursor: pointer; font-size: 14px; color: red;"
+               @click="deletePage(thumbnail.documentId, index + 1)"></span>
+              </div>
+              </div>
+              <div v-show="!thumbnail.source" :id="'thumbnailPage_' + (thumbnail.uniqueId)" style="width: 100%; height:calc(100% - 120px);">
+                <ThumbnailSkeleton />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bs-thumbnail-overlay" style="width: 100%; height:calc(100% - 120px);">
+          <ThumbnailTemplate />
+        </div>
+      </div>
+      <div class="show-thumb-content" :style="{ display : !disableThumbContainer && !showThumbContainer && !isResponsiveLayout() ? 'block' : 'none' }">
+        <ejs-tooltip ref="showOrHideThumbToolTip" :content="showThumbnailsTooltipContent">
+          <ejs-button
+            id="expandThumbnail"
+            tabindex="0"
+            :aria-label="$t('thumbnailComponent.showThumbnail')"
+            :iconCss="expandPanelIcon"
+            style="width:32px;"
+            @click="showOrHideThumbContainer"
+          />
+        </ejs-tooltip>
+        <div class="show-page-navigation">
+          <ejs-button id="pagePreviousButton" :iconCss="pagePreviousIcon" style="width:32px;" :class="[disablePreviousPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']" @click="clickPreviousPage" />
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnailPage', { currentPage: currentPage, totalPage: totalPage }) }}</span>
+          <ejs-button
+            id="pageNextButton"
+            :iconCss="pageNextIcon"
+            class="sf-down-arrow"
+            style="width:32px;"
+            :class="[disableNextPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']"
+            @click="clickNextPage"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script lang="ts">
+import { defineComponent } from 'vue';
+import { TooltipComponent } from '@syncfusion/ej2-vue-popups';
+import { ButtonComponent } from '@syncfusion/ej2-vue-buttons';
+import { UtilityMethods } from '../types/util';
+import { FormElement, PageFormElements, DocumentProperties, ResponsiveMode, CheckboxCondition, BoundingRect, ResizeOptions } from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+import { Accessibility } from '../types/accessibility';
+import ThumbnailSkeleton from './thumbnail-skeleton.vue';
+import ThumbnailTemplate from './thumbnail-template.vue';
+
+export default defineComponent({
+  name: 'ThumbnailComponent',
+  components: {
+    ThumbnailTemplate,
+    ThumbnailSkeleton,
+    'ejs-tooltip': TooltipComponent,
+    'ejs-button': ButtonComponent
+  },
+
+  emits: ['showSkeleton', 'showThumb'],
+
+  data () {
+    let updateAccessibleElements: Function;
+    const isThumbnailRendered: boolean = false;
+    const pdfFormElement: PdfFormElements = null;
+    const documentProperties: DocumentProperties[] = [];
+    const isScreenReaderClicked: boolean = false;
+    return {
+      updateAccessibleElements,
+      isThumbnailRendered,
+      pdfFormElement,
+      documentProperties,
+      isScreenReaderClicked,
+      expandPanelIcon: 'sf-icon-Sidepaneleft1',
+      collapsePanelIcon: 'sf-icon-PanelCollapse',
+      pageNextIcon: 'sf-icon-Control',
+      pagePreviousIcon: 'sf-icon-Control',
+      hideThumbnailsTooltipContent: this.$t('thumbnailComponent.hideThumbnailsTooltipContent'),
+      showThumbnailsTooltipContent: this.$t('thumbnailComponent.showThumbnailsTooltipContent'),
+      thumbnailAlt: this.$t('accessibility.thumbnailAlt'),
+      thumbState: '',
+      showThumbContainer: this.isShowThumbContainer(),
+      disableThumbContainer: false,
+      thumbData: [],
+      thumbnailDocHeading: '',
+      thumbnailDocPageCount: '',
+      currentPdfFile: '',
+      disableNextPage: false,
+      disablePreviousPage: false,
+      currentPage: 0,
+      totalPage: 0,
+      showAdvanceFields: false,
+      isSignerMode: false,
+      fieldRelationId: '',
+      isMobileMode: UtilityMethods.getResponsiveModes(this.$session.responsiveLayout.responsiveMode).isMobileMode,
+      observer: null
+    };
+  },
+
+  /* Data lables Implementation Ends */
+
+  mounted (): void {
+    window.addEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+
+  beforeUnmount () {
+    window.removeEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+  methods: {
+    addObserver (): void {
+      const observableElements = document.querySelectorAll('.bs-thumbnail-body')[0];
+      observableElements.childNodes.forEach((el) => {
+        if (el.nodeType === 1) {
+          this.$data.observer = new IntersectionObserver(
+            this.onThumbnailRenderObserver,
+            {
+              threshold: 0
+            }
+          );
+          this.$data.observer.observe(el);
+        }
+      });
+    },
+
+    onThumbnailRenderObserver (entries: IntersectionObserverEntry[]): void {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const uniqueId = entry.target.children[1].id.split('_')[1];
+          if (!uniqueId) {
+            this.$sentry.captureException(new Error('Thumbnail uniqueId does not exist'));
+          } else {
+            const context = (this as any);
+            this.renderThumbnailWithRetry(context, uniqueId);
+          }
+        }
+      });
+    },
+    async deletePage(documentId, selectedPageNo) {
+      try {
+        const payload = {
+          documentId,
+          selectedPageNo
+        };
+        const response = await this.$nuxt.$api.thumbnail.deletePage({ data: payload });
+        console.log(response);
+        if (response.success) {
+          console.log("page deleted successfully");
+          // Remove the thumbnail from the local state
+          console.log(this.$data.thumbData);
+          const context = (this as any);
+          this.$data.thumbData = this.$data.thumbData.filter(thumbnail => {
+            const pageNumber = parseInt(thumbnail.pageId.split('_')[1], 10); // Extracts the page number
+            return pageNumber !== selectedPageNo; // Compare the page number
+          });
+          console.log(this.$data.thumbData);
+
+          for (let i = 0; i < this.$data.thumbData.length; i++) {
+            this.$data.thumbData[i].currentDocumentPageNumber = this.$data.thumbData[i].currentDocumentPageNumber - 1;
+          }
+
+          console.log(this.$data.thumbData);
+
+          const mainData: any = this.$session.mainData;
+          console.log(mainData);
+          this.$data.totalPage = UtilityMethods.getPageCount(this.documentProperties);
+          console.log("pagecount:", this.$data.totalPage)
+          const uploadDocumentList = this.$session.mainData.uploadedDocumentList;
+          console.log(uploadDocumentList);
+        } else {
+          console.log("page not deleted");
+        }
+      } catch (error) {
+        this.$sentry.captureException(error);
+      }
+},
+
+    renderThumbnailWithRetry (context: any, uniqueId:string, retryCount : number = 2): any {
+      const pageIndex = context.$data.thumbData.findIndex(page => page.uniqueId === uniqueId);
+      if (pageIndex === -1) {
+        this.$sentry.captureException(new Error('Thumbnail pageIndex does not exist'));
+      } else {
+        const pageToUpdate = context.$data.thumbData[pageIndex];
+        if (!pageToUpdate.source) {
+          const embedData: any = this.$session.embedData;
+          const mainData: any = this.$session.mainData;
+          let signerId = mainData.currentUserId ? mainData.currentUserId : mainData.currentSignerId;
+          if (embedData.isEmbedPage) {
+            signerId = embedData.embedId;
+          }
+          const thumbnailContentDetails = {
+            documentId: pageToUpdate.documentId,
+            parentDocumentId: pageToUpdate.parentDocumentId,
+            currentPageNumber: pageToUpdate.currentDocumentPageNumber.toString(),
+            uniqueId: pageToUpdate.uniqueId,
+            signerId,
+            secretId: mainData.secretId
+          };
+          this.$nuxt.$api.thumbnail.renderThumbnail({
+            data: thumbnailContentDetails
+          }).then((response) => {
+            const updateIndex = context.$data.thumbData.findIndex(page => page.uniqueId === response.uniqueId);
+            if (updateIndex !== -1) {
+              const reader = new FileReader();
+              reader.onloadend = function () {
+                context.$data.thumbData[updateIndex].source = reader.result;
+              };
+              reader.readAsDataURL(response.data);
+            }
+          }).catch((error) => {
+            if (retryCount > 0) {
+              this.renderThumbnailWithRetry(context, uniqueId, retryCount - 1);
+            } else {
+              this.$sentry.captureException(error);
+            }
+          });
+        }
+      }
+    },
+
+    imgLoad (): void {
+      if (this.$data.thumbState) {
+        this.$data.thumbState = '';
+      }
+    },
+
+    loadThumbnail (pdfFormElement: PdfFormElements, documentProperties: DocumentProperties[], pageName: string, isSignerMode: boolean = false): void {
+      this.pdfFormElement = pdfFormElement;
+      this.documentProperties = documentProperties;
+      this.$data.isSignerMode = isSignerMode;
+      if (pageName === 'prepare') {
+        if (this.$session.mainData.isDocumentAddedorReplaced) {
+          this.$emit('showSkeleton');
+        } else {
+          this.$mutation.updateMainData({ prepareProgress: false });
+        }
+      }
+      this.$data.thumbState = ' show-progress';
+      this.$data.thumbData = UtilityMethods.generateThumbImages(documentProperties);
+      setTimeout((): void => {
+        this.imgLoad();
+        this.addObserver();
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+        thumbImageContainer.parentElement.classList.add('active-thumb');
+        this.isThumbnailRendered = true;
+        for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+          const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+          if (pageName === 'sign') {
+            this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+          } else {
+            this.updateThumbnailFieldCount(pageFormElement.pageIndex);
+          }
+        }
+        const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+        this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+        this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+        this.$data.thumbnailDocHeading = docProperties.documentName;
+        this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+        this.$data.currentPdfFile = docProperties.documentName;
+        if (pageName === 'sign') {
+          Accessibility.setAccessibilityAttributesAfterPageLoad();
+          UtilityMethods.triggerEvent(this.updateAccessibleElements, {});
+        }
+      }, 100);
+    },
+
+    updateThumbnailFieldCount (pageIndex: number): void {
+      const context = this as any;
+      if (this.isThumbnailRendered) {
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        if (!thumbImageContainer.parentElement.classList.contains('enable-field-count')) {
+          thumbImageContainer.parentElement.classList.add('enable-field-count');
+        }
+        const fieldSpan: HTMLSpanElement = thumbImageContainer.nextElementSibling.children[0] as HTMLSpanElement;
+        const pageFormElement: PageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageIndex);
+        let fieldCount: number = 0;
+        if (pageFormElement && pageFormElement.formElements && pageFormElement.formElements.length > 0) {
+          fieldCount = pageFormElement.formElements.filter((formElement: FormElement) => formElement.id !== 'multipleSelection' && formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && (formElement.elementType !== 'checkbox' || (formElement.groupName === null)) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing)).length;
+          const checkboxElement = this.pdfFormElement.checkboxFieldCount();
+          fieldCount += checkboxElement.length > 0 ? checkboxElement.filter(x => x.pageIndex === pageIndex).length : 0;
+        }
+        if (fieldCount > 0) {
+          fieldSpan.innerText = fieldCount + (fieldCount > 1 ? ' ' + context.$t('common.fields') : ' ' + context.$t('common.field')) + ' ' + context.$t('common.added');
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    updatePageContent (documentProperties: DocumentProperties[]) {
+      debugger
+      const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+      const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+      this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+      for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+        const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+        this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+      }
+      this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+      this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+    },
+
+    updateFieldRelationId (fieldRelationId: any): void {
+      this.$data.fieldRelationId = fieldRelationId;
+    },
+
+    onPageChangeEvent (args: any, documentList: any): void {
+      if (this.isThumbnailRendered) {
+        UtilityMethods.scrollThumbImageToView(args.currentPageNumber, this.$data.thumbData);
+      }
+      if (!this.$data.showThumbContainer) {
+        this.$data.currentPage = args.currentPageNumber;
+        const totalPage = UtilityMethods.getPageCount(documentList);
+        if (this.$data.currentPage === 1) {
+          this.$data.disablePreviousPage = true;
+          this.$data.disableNextPage = false;
+        } else if (totalPage !== 1 && totalPage === args.currentPageNumber) {
+          this.$data.disableNextPage = true;
+          this.$data.disablePreviousPage = false;
+        } else {
+          this.$data.disableNextPage = false;
+          this.$data.disablePreviousPage = false;
+        }
+      }
+    },
+
+    updateThumbnailFieldCountSigningPage (pageIndex: number, formElements: FormElement[]): void {
+      if (this.isThumbnailRendered) {
+        const context = this as any;
+        const thumbImageContainer1: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        const status: string = this.getFiledFormElements(formElements);
+        const fieldSpan: HTMLSpanElement = thumbImageContainer1.nextElementSibling.children[0] as HTMLSpanElement;
+        const fieldCount: number = this.getTotalFieldCount(formElements);
+        if (status === 'success' && fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+
+          const filledCount: number = this.getFilledCount(formElements);
+          fieldSpan.innerText = filledCount + ' ' + context.$t('common.of') + ' ' + fieldCount + ' ' + context.$t('common.fields') + ' ' + context.$t('common.filled');
+        } else if (fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+          if (thumbImageContainer1.parentElement.classList.contains('enable-complete-container')) {
+            thumbImageContainer1.parentElement.classList.remove('enable-complete-container');
+          }
+          fieldSpan.innerText = status;
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer1.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    getFilledCount (formElements: FormElement[]): number {
+      let filledCount: number = 0;
+      for (let i = 0; i < formElements.length; i++) {
+        const formElement: FormElement = formElements[i];
+        if (formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && formElement.elementType !== 'formula' && formElement.elementType !== 'formula' && this.$data.fieldRelationId === formElement.signerId && formElement.visibility) {
+          if (formElement.isRequired && formElement.allowEditing) {
+            if (formElement.elementType === 'checkbox') {
+              if (formElement.value === 'on') {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'radiobutton') {
+              const filledChild = formElement.children.find((child: FormElement) => child.value === 'on');
+              if (filledChild) {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'attachment') {
+              if (formElement.attachmentDetails && formElement.attachmentDetails.length > 0) {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'textbox' && formElement.value) {
+              if (UtilityMethods.TextboxValidationType(formElement, formElement.value)) {
+                filledCount += 1;
+              }
+            } else if (formElement.value) {
+              filledCount += 1;
+            }
+          } else if (formElement.elementType === 'checkbox' && formElement.groupName) {
+            const checkboxGroupCount = this.pdfFormElement.getGroupCheckboxCount(formElement.groupName);
+            if (checkboxGroupCount === 1) {
+              filledCount += 1;
+            }
+          } else {
+            filledCount += 1;
+          }
+        }
+      }
+      filledCount += this.getGroupCheckboxFilledCount(formElements);
+      return filledCount;
+    },
+    getGroupCheckboxFilledCount (formElements: FormElement[]) :number {
+      let filledCount = 0;
+      const totalCheckboxElements: FormElement[] = formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility);
+      if (totalCheckboxElements.length > 0) {
+        const groupedElements: Record<string, FormElement[]> = UtilityMethods.getCheckboxesGroupedByName(totalCheckboxElements);
+        const totalCheckboxElementsInAllPage: FormElement[] = this.pdfFormElement.pageFormElementsList.flatMap(pageFormElement => pageFormElement.formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility));
+        for (const groupName in groupedElements) {
+          const group = totalCheckboxElementsInAllPage.filter(x => x.groupName === groupName && x.visibility);
+          if (group.length > 1) {
+            const firstCheckboxElement = group[0];
+            if (formElements.includes(firstCheckboxElement)) {
+              const checkedCount = group.filter(x => x.value === 'on').length;
+              if (firstCheckboxElement.isReadOnly) {
+                filledCount += 1;
+                continue;
+              }
+              switch (firstCheckboxElement.checkboxConditionInfo.conditionType) {
+                case CheckboxCondition.Minimum:
+                  if (checkedCount >= firstCheckboxElement.checkboxConditionInfo.minimum) {
+                    filledCount += 1;
+                  }
+                  break;
+                case CheckboxCondition.Maximum:
+                  if (checkedCount <= firstCheckboxElement.checkboxConditionInfo.maximum) {
+                    filledCount += 1;
+                  }
+                  break;
+                case CheckboxCondition.Absolute:
+                  if (checkedCount === firstCheckboxElement.checkboxConditionInfo.absolute) {
+                    filledCount += 1;
+                  }
+                  break;
+                case CheckboxCondition.Range:
+                  if (checkedCount >= firstCheckboxElement.checkboxConditionInfo.minimum && checkedCount <= firstCheckboxElement.checkboxConditionInfo.maximum) {
+                    filledCount += 1;
+                  }
+                  break;
+              }
+            } else {
+              const { pageIndex } = this.pdfFormElement.pageFormElementsList.find(x => x.formElements.some(y => y.id === firstCheckboxElement.id));
+              const pageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageIndex);
+              this.updateThumbnailFieldCountSigningPage(pageIndex, pageFormElements.formElements);
+            }
+          }
+        }
+      }
+      return filledCount;
+    },
+
+    getTotalFieldCount (formElements: FormElement[]): number {
+      let fieldCount: number = formElements.filter(x => x.elementType !== 'label' && x.elementType !== 'hyperlink' && x.elementType !== 'checkbox' && x.elementType !== 'formula' && this.$data.fieldRelationId === x.signerId && x.visibility).length;
+      const totalCheckboxElements: FormElement[] = formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility);
+      if (totalCheckboxElements.length > 0) {
+        const groupedElements: Record<string, FormElement[]> = UtilityMethods.getCheckboxesGroupedByName(totalCheckboxElements);
+        const totalCheckboxElementsInAllPage: FormElement[] = this.pdfFormElement.pageFormElementsList.flatMap(pageFormElement => pageFormElement.formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility));
+        for (const groupName in groupedElements) {
+          const group = totalCheckboxElementsInAllPage.filter(x => x.groupName === groupName);
+          if (formElements.includes(group[0])) {
+            fieldCount += 1;
+          }
+        }
+        fieldCount += totalCheckboxElements.filter(x => x.groupName === null).length;
+      }
+      return fieldCount;
+    },
+
+    getFiledFormElements (formElements: FormElement[]): string {
+      const context = this as any;
+      const filledCount: number = this.getFilledCount(formElements);
+      const fieldCount: number = this.getTotalFieldCount(formElements);
+      if (this.$data.isSignerMode) {
+        if (filledCount === fieldCount) {
+          return 'success';
+        } else {
+          return filledCount + ' ' + context.$t('common.of') + ' ' + fieldCount + ' ' + context.$t('common.fields') + ' ' + context.$t('common.filled');
+        }
+      } else {
+        return fieldCount + (fieldCount > 1 ? ' ' + context.$t('common.fields') : ' ' + context.$t('common.field')) + ' ' + context.$t('common.added');
+      }
+    },
+
+    getDocumentProperties (pageId: string, documentProperties: any): DocumentProperties {
+      return UtilityMethods.getCurrentDocumentProperties(pageId, this.$data.thumbData, documentProperties);
+    },
+
+    getThumbDataLength (): number {
+      return this.$data.thumbData.length;
+    },
+
+    screenReaderAccessibility (value: boolean) : void {
+      this.$data.disableThumbContainer = value;
+      this.isScreenReaderClicked = true;
+      UtilityMethods.triggerEvent(this.updateAccessibleElements, {});
+      if (this.$data.showThumbContainer) {
+        this.showOrHideThumbContainer();
+      } else {
+        Accessibility.filterThumbnailElementIds(this.$data.showThumbContainer);
+      }
+    },
+
+    showOrHideThumbContainer (): void {
+      if (this.$data.showThumbContainer) {
+        this.$nuxt.$userInsight.track(MixPanelAction.ShowThumbnailClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.ShowThumbnailClickAction, Origin: UserInsightOrigin.PrepareDocument }));
+        this.$data.disableNextPage = this.$data.disablePreviousPage = false;
+        this.$data.totalPage = UtilityMethods.getPageCount(this.documentProperties);
+        this.$data.currentPage = this.pdfFormElement.selectedPageIndex;
+        if (this.$data.currentPage === 1) {
+          this.$data.disablePreviousPage = true;
+        }
+        if (this.$data.currentPage === this.$data.totalPage) {
+          this.$data.disableNextPage = true;
+        }
+      } else {
+        this.$nuxt.$userInsight.track(MixPanelAction.HideThumbnailClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.HideThumbnailClickAction, Origin: UserInsightOrigin.PrepareDocument }));
+      }
+      this.$data.showThumbContainer = !this.$data.showThumbContainer;
+      Accessibility.filterThumbnailElementIds(this.$data.showThumbContainer);
+      this.$emit('showThumb', this.$data.showThumbContainer);
+      this.hideToolTip();
+    },
+
+    clickNextPage (): void {
+      this.pdfFormElement.pdfInstance.navigation.goToPage(this.pdfFormElement.selectedPageIndex + 1);
+      const pageCount = UtilityMethods.getPageCount(this.documentProperties);
+      if (this.pdfFormElement.selectedPageIndex + 1 === pageCount) {
+        this.$data.disableNextPage = true;
+      }
+      this.$data.disablePreviousPage = false;
+      this.$data.currentPage = this.pdfFormElement.selectedPageIndex + 1 <= pageCount ? this.pdfFormElement.selectedPageIndex + 1 : pageCount;
+    },
+
+    clickPreviousPage (): void {
+      this.pdfFormElement.pdfInstance.navigation.goToPage(this.pdfFormElement.selectedPageIndex - 1);
+      if (this.pdfFormElement.selectedPageIndex - 1 === 1) {
+        this.$data.disablePreviousPage = true;
+      }
+      this.$data.disableNextPage = false;
+      this.$data.currentPage = this.pdfFormElement.selectedPageIndex - 1 >= 1 ? this.pdfFormElement.selectedPageIndex - 1 : 1;
+    },
+
+    thumbScrollChange (evt: Event): void {
+      if (!evt.cancelable) {
+        const scrollTop: number = (evt.target as HTMLElement).scrollTop;
+        if (this.$data.thumbData) {
+          const currentPageData = this.$data.thumbData.find((thumbData1: any) => thumbData1.scrollTop > scrollTop);
+          if (currentPageData && currentPageData.documentName !== this.$data.currentPdfFile) {
+            this.$data.currentPdfFile = currentPageData.documentName;
+            this.$data.thumbnailDocHeading = currentPageData.documentName;
+            this.$data.thumbnailDocPageCount = currentPageData.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: currentPageData.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: currentPageData.pageCount });
+          }
+        }
+      }
+    },
+
+    navigatePageFromThumbnail (index: number): void {
+      this.pdfFormElement.pdfInstance.navigation.goToPage(index);
+      this.$nuxt.$userInsight.track(MixPanelAction.PageChangeInThumbnailBar, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.PageChangeInThumbnailBarAction, Origin: UserInsightOrigin.PrepareDocument }));
+    },
+above code from thumbnail vue
+
+ deletePage ({ data }: ApiParamsType) {
+        return $axios.post('/api/PdfViewer/DeletePage', data);
+      }
+above code form index ts
+
+public async Task<bool> DeletePage(DeletePageDetails deletePageDetails, CancellationToken token)
+{
+    try
+    {
+        var organizationId = this.userDataService?.OrganizationId;
+        BlobContainerClient sourceBlobContainer = await this.CloudStorage.GetContainer(deletePageDetails.DocumentId, organizationId).ConfigureAwait(false);
+        var documentBlob = sourceBlobContainer.GetBlobClient(DbConstants.Document);
+
+        // Download the document to a memory stream
+        MemoryStream documentStream = new MemoryStream();
+        await this.CloudStorage.DownloadToStreamAsync(documentBlob, documentStream, true, token).ConfigureAwait(false);
+
+        using (PdfLoadedDocument loadedDocument = new PdfLoadedDocument(documentStream))
+        {
+            // Remove the page
+            loadedDocument.Pages.RemoveAt(deletePageDetails.SelectedPageNo-1);
+
+            // Save the updated document to a memory stream
+            var downloadStream = new MemoryStream();
+            loadedDocument.Save(downloadStream);
+
+            // Upload the modified document back to blob storage
+            // var updatedDocumentBlob = sourceBlobContainer.GetBlobClient($"{deletePageDetails.DocumentId}-{DbConstants.Document}");
+            downloadStream.Position = 0;  // Reset position before uploading
+            await this.CloudStorage.UploadFromStreamAsync(documentBlob, downloadStream, true).ConfigureAwait(false);
+          
+
+            Console.WriteLine($"Page {deletePageDetails.SelectedPageNo} removed successfully.");
+            return true;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error occurred: {ex.Message}");
+        return false;
+    }
+}
+  public async Task<string> Load(Dictionary<string, object> jsonObject, CancellationToken token)
+    {
+      string documentId = string.Empty;
+      string documentLoadDetails = string.Empty;
+      string documentPageDetails = string.Empty;
+      string scannedBlobName = string.Empty;
+      string signerId = string.Empty;
+
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      signerId = this.GetSignerId(jsonObject, this.httpContextAccessor.HttpContext);
+
+      if (string.IsNullOrEmpty(signerId))
+      {
+        throw new InvalidDataException(CommonResource.InvalidSignerId);
+      }
+
+      if (jsonObject.ContainsKey("document"))
+      {
+        documentLoadDetails = jsonObject["document"].ToString();
+      }
+      else if (jsonObject.ContainsKey("documentId") && string.IsNullOrEmpty(documentId))
+      {
+        documentLoadDetails = jsonObject["documentId"].ToString();
+      }
+
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+      scannedBlobName = isPrintSignDocument ? $"{DbConstants.ScannedDocument}/" : scannedBlobName;
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+        documentPageDetails = DbConstants.DocumentDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(documentLoadDetails);
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault().DocumentId : documentId;
+        documentPageDetails = isPrintSignDocument ? DbConstants.DocumentDetails : DbConstants.DocumentMergedDetails;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      BlobContainerClient blobContainer =
+        await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+      if (!await blobContainer.ExistsAsync().ConfigureAwait(false))
+      {
+        throw new InvalidDataException(CommonResource.InvalidDocumentId);
+      }
+
+      var blob = blobContainer.GetBlobClient($"{scannedBlobName}{documentPageDetails}");
+      var documentDetails = await this.CloudStorage.DownloadAsync<PdfViewerLoadDetails>(blob, false).ConfigureAwait(false);
+      documentDetails = this.AddUniqueIDToViewerLoadDetails(documentDetails, jsonObject);
+      documentDetails.SecretId = await this.secretkeyGenerationService.Generate(documentId, signerId).ConfigureAwait(false);
+      return documentDetails.ToNewsoftJson();
+    }
+
+    /// <inheritdoc/>
+    public async Task<byte[]> RenderPdfPages(Dictionary<string, object> jsonObject, BrowserType browserType, CancellationToken token)
+    {
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      int pageNumber = int.Parse(jsonObject["pageNumber"].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+      var intialPageNumber = pageNumber;
+      float scaleFactor = float.Parse(jsonObject["zoomFactor"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture);
+      string documentLoadDetails = jsonObject["documentId"].ToString();
+      string blobDirectoryName = string.Empty;
+      string documentId;
+      string scannedBlobName = string.Empty;
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(jsonObject["documentId"].ToString()); // JsonSerializer.Deserialize<DocumentProperties[]>(jsonObject["documentId"].ToString());
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault()?.DocumentId : documentId;
+        blobDirectoryName = GetBlobDirectoryName(ref pageNumber, viewerLoadDetails);
+      }
+
+      if (isPrintSignDocument)
+      {
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+        blobDirectoryName = string.Empty;
+        pageNumber = intialPageNumber;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      var blobContainer = await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+
+      var blobName = $"{scannedBlobName}{blobDirectoryName}{DbConstants.Page}-{pageNumber}-{scaleFactor}";
+      var webpBlobName = browserType switch
+      {
+        BrowserType.Chrome or BrowserType.Firefox or BrowserType.Edge => $"{blobName}-webp",
+        _ => blobName
+      };
+
+      var blob = blobContainer.GetBlobClient(webpBlobName);
+      PdfViewerImage imageDetails = null;
+      if (await blob.ExistsAsync(token).ConfigureAwait(false))
+      {
+        await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+        imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+      }
+      else
+      {
+        blob = blobContainer.GetBlobClient(blobName);
+        if (await blob.ExistsAsync(token).ConfigureAwait(false))
+        {
+          await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+          imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+        }
+      }
+
+      if (imageDetails == null)
+      {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+        imageDetails = await this.ExtractImageFromDocument(pageNumber, scaleFactor, blobDirectoryName, blobContainer, blob/*, token*/).ConfigureAwait(false);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+      }
+
+      return BinarySerializer.Serialize(this.AddUniqueIdToRenderImageDetails(imageDetails, intialPageNumber, jsonObject, scaleFactor));
+    }
+above method are service method
+[HttpPost("DeletePage")]
+[PolicyValidation(PolicyStatus = PolicyStatus.Internally)]
+public async Task<IActionResult> DeletePage([FromBody] DeletePageDetails deletePageDetails, CancellationToken token)
+{
+    try
+    {
+        var deletionResult = await this.pdfViewerService.DeletePage(deletePageDetails, token).ConfigureAwait(false);
+        if (deletionResult)
+        {
+            return this.Ok(new { success = true, message = "Page deleted successfully" });
+        }
+
+        return this.NotFound(new { success = false, message = "Page could not be deleted." });
+    }
+    catch (Exception ex)
+    {
+        return this.StatusCode(500, new { success = false, message = $"Internal server error: {ex.Message}" });
+    }
+}
+    
+above code from controller
+
+  public async Task<string> UploadAsync(IDocumentUploadDetails documentUploadDetails, bool isPrintSignDocument, IResponseWriter responseWriter = null, string preDefinedDocumentId = null, bool isNormalUpload = true, CancellationToken cancellationToken = default)
+    {
+      if (documentUploadDetails is null)
+      {
+        throw new ArgumentNullException(nameof(documentUploadDetails));
+      }
+
+      var uniqueId = string.IsNullOrEmpty(preDefinedDocumentId) ? Guid.NewGuid().ToString() : preDefinedDocumentId;
+      _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.InProgress);
+      string parentId = string.IsNullOrEmpty(documentUploadDetails.ParentDocumentId) ? uniqueId : $"{documentUploadDetails.ParentDocumentId}";
+      string childId = string.IsNullOrEmpty(documentUploadDetails.ParentDocumentId) ? string.Empty : $"{uniqueId}/";
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from user data service.
+      var organizationId = documentUploadDetails.OrganizationId;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        organizationId = documentUploadDetails.OrganizationId = this.userDataService?.OrganizationId;
+      }
+
+      this.httpContextAccessor.HttpContext.Items.Add(UploadProgressOptionsKey, new UploadProgressOptions()
+      {
+        IsPrintAndSignDocument = isPrintSignDocument,
+        ChannelId = isPrintSignDocument ? parentId : documentUploadDetails.UploadChannelId,
+        ParentDocumentId = string.IsNullOrEmpty(documentUploadDetails.ParentDocumentId) ? uniqueId : documentUploadDetails.ParentDocumentId,
+        DocumentId = uniqueId,
+        DocumentClientId = documentUploadDetails.DocumentClientId,
+        IsNormalUpload = isNormalUpload,
+        ResponseWriter = (responseWriter is ResponseWriter<HttpResponse>) ? null : responseWriter,
+      });
+
+      try
+      {
+        await this.UploadAndManipulateDocument(parentId, uniqueId, childId, isPrintSignDocument, documentUploadDetails, responseWriter, cancellationToken).ConfigureAwait(false);
+        _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Completed);
+        return uniqueId;
+      }
+      catch (PdfDocumentException ex) when (ex.Message == "Can't open an encrypted document. The password is invalid.")
+      {
+        _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Failure, CommonResource.InvalidPassword);
+        await this.UpdateUploadProgress(CommonResource.InvalidPassword, true).ConfigureAwait(false);
+        this.logger.LogError(ex, CommonResource.InvalidPassword);
+#pragma warning disable CA2200 // Rethrow for catching in controller and setting 400 resoponse.
+        throw ex;
+#pragma warning restore CA2200 // Rethrow to preserve stack details.
+      }
+      catch (OperationCanceledException)
+      {
+        _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Failure, CommonResource.OperationCanceled);
+        if (isPrintSignDocument)
+        {
+          var cloudBlobContainer = await this.CloudStorage.GetContainer(parentId, organizationId).ConfigureAwait(false);
+
+          var resultSegment = cloudBlobContainer.GetBlobsByHierarchyAsync(prefix: $"{DbConstants.ScannedDocument}/", delimiter: "/")
+           .AsPages(default, BlobRequestCount);
+
+          // Enumerate therough each blob and delete.
+          await foreach (Azure.Page<BlobHierarchyItem> blobPage in resultSegment)
+          {
+            foreach (BlobHierarchyItem blobhierarchyItem in blobPage.Values)
+            {
+              if (blobhierarchyItem.IsBlob)
+              {
+                _ = cloudBlobContainer.DeleteBlobAsync(blobhierarchyItem.Blob.Name).ConfigureAwait(false);
+              }
+            }
+          }
+        }
+
+        throw;
+      }
+      catch (Exception exception)
+      {
+        if (exception is PdfException || exception is InvalidOperationException || exception is InvalidDataException)
+        {
+          string message = exception switch
+          {
+            PdfException pdfException => pdfException.Message switch
+            {
+              Constants.InvalidPassword => CommonResource.InvalidPassword,
+              Constants.Portfolio => CommonResource.UnSupportedPortfolio,
+              _ => CommonResource.CorruptedDocument
+            },
+            _ => exception.Message
+          };
+          _ = this.documentUploadStatusService.UpdateDocumentUploadStatusAsync(Guid.Parse(uniqueId), UploadStatus.Failure, message);
+          await this.UpdateUploadProgress(message, true).ConfigureAwait(false);
+          this.logger.LogError(exception, message);
+        }
+
+        throw;
+      }
+    }
+above code from manipulator service
