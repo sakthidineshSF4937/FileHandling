@@ -1,0 +1,247 @@
+  // private async Task ProcessAndExtractPdfFormFields(PdfLoadedDocument loadedDocument, string parentId, string childId, string organizationId)
+    // {
+
+    //   if (loadedDocument?.Form?.Fields == null)
+    //   {
+    //     return;
+    //   }
+
+    //   var fieldCollection = loadedDocument.Form.Fields;
+    //   var pageFormElements = new ConcurrentBag<PageFormElements>();
+
+    //    // Configure parallelism options
+    // var parallelOptions = new ParallelOptions
+    // {
+    //     MaxDegreeOfParallelism = 20, // e.g., 8 on an 8-core CPU
+    // };
+
+    // // Process fields in parallel with async support
+    // await Parallel.ForEachAsync(fieldCollection.Cast<PdfLoadedField>(), parallelOptions, (field, ct) =>
+    // {
+    //   switch (field)
+    //         {
+    //           case PdfLoadedTextBoxField textBoxField when textBoxField.Visibility != PdfFormFieldVisibility.Hidden:
+    //           case PdfLoadedCheckBoxField checkBoxField when checkBoxField.Visibility != PdfFormFieldVisibility.Hidden:
+    //           case PdfLoadedComboBoxField dropDownField when dropDownField.Visibility != PdfFormFieldVisibility.Hidden:
+
+    //             foreach (var element in PrepareFormFields(loadedDocument, field))
+    //             {
+    //               pageFormElements.Add(element);
+    //             }
+
+    //             break;
+
+    //           case PdfLoadedSignatureField signatureField when signatureField.Visibility != PdfFormFieldVisibility.Hidden:
+    //             {
+    //               // condition to avoid extracting the fields from signed document.
+    //               if (signatureField.Bounds.X != 0 && signatureField.Bounds.Y != 0)
+    //               {
+    //                 var bounds = this.ConvertToPixelsFromPoints(signatureField.Bounds);
+    //                 foreach (var element in PrepareFormFields(loadedDocument, field, bounds))
+    //                 {
+    //                   pageFormElements.Add(element);
+    //                 }
+    //               }
+    //             }
+
+    //             break;
+
+    //           case PdfLoadedRadioButtonListField radioButton when radioButton.Visibility != PdfFormFieldVisibility.Hidden:
+    //             {
+    //               PdfLoadedRadioButtonItemCollection radioCollection = radioButton.Items;
+    //               List<FormElement> childFormElement = new List<FormElement>();
+    //               foreach (PdfLoadedRadioButtonItem item in radioCollection)
+    //               {
+    //                 var bound = this.ConvertToPixelsFromPoints(item.Bounds);
+    //                 FormElement childForm = new FormElement();
+    //                 childForm.Id = item.OptionValue;
+    //                 childForm.ElementType = "child";
+    //                 childForm.Bounds = bound;
+    //                 childForm.GroupName = field.Name;
+    //                 childForm.FontFamily = GetFontFamily(item.Font.Name);
+    //                 childForm.FontSize = item.Font.Size;
+    //                 childForm.AllowEditing = true;
+    //                 childForm.EnableWrapping = false;
+    //                 childForm.IsRequired = true;
+    //                 childFormElement.Add(childForm);
+    //               }
+
+    //               var parentElements = PrepareFormFields(loadedDocument, field);
+    //               parentElements[0].FormElements[0].Children = childFormElement.ToArray();
+    //               foreach (var element in parentElements)
+    //               {
+    //                 pageFormElements.Add(element);
+    //               }
+    //             }
+
+    //             break;
+    //         }
+
+    //   return ValueTask.CompletedTask;
+    // });
+
+    // // Group by page index and consolidate
+    // var groupedElements = pageFormElements
+    //     .GroupBy(x => x.PageIndex)
+    //     .Select(g => new PageFormElements
+    //     {
+    //         PageIndex = g.Key,
+    //         FormElements = g.SelectMany(x => x.FormElements).ToArray()
+    //     })
+    //     .ToList();
+
+    // if (groupedElements.Count == 0) return;
+
+    // // Upload to cloud storage
+    //  var cloudBlobContainer = await this.CloudStorage.GetContainer(parentId, organizationId).ConfigureAwait(false);
+    //     var blobClientDocument = cloudBlobContainer.GetBlobClient(string.IsNullOrEmpty(childId)
+    //      ? DbConstants.DocumentPdfFields
+    //     : $"{childId}{DbConstants.DocumentPdfFields}");
+    //  await CloudStorage.UploadFromByteArrayAsync(blobClientDocument, BinarySerializer.Serialize(groupedElements), 0, true).ConfigureAwait(false);
+
+    // await CloudStorage.UploadFromByteArrayAsync(
+    //     blobClientDocument,
+    //     BinarySerializer.Serialize(groupedElements),
+    //     0,
+    //     true
+    // ).ConfigureAwait(false);
+
+    // }
+
+
+
+
+  private List<PageFormElements> CreateFormElementsFromPdfFields(PdfLoadedDocument loadedDocument, PdfLoadedField field, BoldSign.Base.Models.Rectangle bounds = null)
+{
+    var pageElements = new List<PageFormElements>();
+    var formElement = new FormElement();
+    BoldSign.Base.Models.Rectangle bound = null;
+
+    switch (field)
+      {
+        case PdfLoadedTextBoxField textBoxField:
+          var textboxFieldCollection = textBoxField.Items;
+          if (textboxFieldCollection.Count > 0)
+          {
+            foreach (PdfLoadedTexBoxItem textboxItem in textboxFieldCollection)
+            {
+              formElement = new FormElement
+              {
+                ElementType = "TextBox",
+                FontFamily = GetFontFamily(textBoxField.Font.Name),
+                FontSize = this.converter.ConvertToPixels(textBoxField.Font.Size, PdfGraphicsUnit.Point),
+                EnableWrapping = true,
+                Bounds = bound = this.ConvertToPixelsFromPoints(textboxItem.Bounds),
+                MaxHeight = bound.Height,
+                MaxWidth = bound.Width,
+              };
+              SetCommonProperties();
+              pageElements.Add(new PageFormElements
+              {
+                PageIndex = loadedDocument.Pages.IndexOf(textboxItem.Page) + 1,
+                FormElements = [formElement],
+              });
+            }
+          }
+          else
+          {
+            formElement.ElementType = "TextBox";
+            formElement.FontFamily = GetFontFamily(textBoxField.Font.Name);
+            formElement.FontSize = this.converter.ConvertToPixels(textBoxField.Font.Size, PdfGraphicsUnit.Point);
+            formElement.EnableWrapping = true;
+            formElement.Bounds = bound = this.ConvertToPixelsFromPoints(textBoxField.Bounds);
+            formElement.MaxHeight = bound.Height;
+            formElement.MaxWidth = bound.Width;
+            SetCommonProperties();
+            pageElements.Add(new PageFormElements
+            {
+              PageIndex = loadedDocument.Pages.IndexOf(field.Page) + 1,
+              FormElements = [formElement],
+            });
+          }
+
+          break;
+        case PdfLoadedSignatureField signatureField:
+          formElement.ElementType = "Signature";
+          formElement.FontFamily = GetFontFamily(signatureField.Font.Name);
+          formElement.FontSize = signatureField.Font.Size;
+          formElement.EnableWrapping = false;
+          formElement.Bounds = bounds;
+          if (bounds != null)
+          {
+            formElement.MaxHeight = bounds.Height;
+            formElement.MaxWidth = bounds.Width;
+          }
+
+          SetCommonProperties();
+          pageElements.Add(new PageFormElements
+          {
+            PageIndex = loadedDocument.Pages.IndexOf(field.Page) + 1,
+            FormElements = [formElement],
+          });
+          break;
+        case PdfLoadedCheckBoxField checkBoxField:
+          formElement.ElementType = "CheckBox";
+          formElement.FontFamily = GetFontFamily(checkBoxField.Font.Name);
+          formElement.FontSize = checkBoxField.Font.Size;
+          formElement.EnableWrapping = false;
+          formElement.Value = "off";
+          formElement.Bounds = bound = this.ConvertToPixelsFromPoints(checkBoxField.Bounds);
+          formElement.MaxHeight = bound.Height;
+          formElement.MaxWidth = bound.Width;
+          SetCommonProperties();
+          pageElements.Add(new PageFormElements
+          {
+            PageIndex = loadedDocument.Pages.IndexOf(field.Page) + 1,
+            FormElements = [formElement],
+          });
+          break;
+        case PdfLoadedRadioButtonListField radioField:
+          formElement.ElementType = "RadioButton";
+          formElement.FontFamily = GetFontFamily(radioField.Font.Name);
+          formElement.FontSize = radioField.Font.Size;
+          formElement.EnableWrapping = false;
+          formElement.GroupName = field.Name;
+          SetCommonProperties();
+          pageElements.Add(new PageFormElements
+          {
+            PageIndex = loadedDocument.Pages.IndexOf(field.Page) + 1,
+            FormElements = [formElement],
+          });
+          break;
+        case PdfLoadedComboBoxField dropDownField:
+          formElement.ElementType = "DropDown";
+          formElement.FontFamily = GetFontFamily(dropDownField.Font.Name);
+          formElement.FontSize = this.converter.ConvertToPixels(dropDownField.Font.Size, PdfGraphicsUnit.Point);
+          formElement.EnableWrapping = false;
+          formElement.Bounds = bound = this.ConvertToPixelsFromPoints(dropDownField.Bounds);
+          formElement.MaxHeight = bound.Height;
+          formElement.MaxWidth = bound.Width;
+          formElement.Label = dropDownField.ActualFieldName;
+          formElement.Value = dropDownField.SelectedValue;
+          formElement.DropdownOptions = dropDownField.Values.ToList<PdfLoadedListItem>().Where(item => !string.IsNullOrEmpty(item.Value)).Select(item => item.Value).ToArray();
+          SetCommonProperties();
+          pageElements.Add(new PageFormElements
+          {
+            PageIndex = loadedDocument.Pages.IndexOf(field.Page) + 1,
+            FormElements = [formElement],
+          });
+          break;
+      }
+
+    return pageElements;
+
+    void SetCommonProperties()
+    {
+      formElement.Id = field.Name;
+      formElement.IsRequired = field.Required;
+      formElement.AllowEditing = true;
+    }
+}
+
+
+private List<PageFormElements> PrepareFormFields(PdfLoadedDocument loadedDocument, PdfLoadedField field, BoldSign.Base.Models.Rectangle bounds = null)
+    {
+      return CreateFormElementsFromPdfFields(loadedDocument, field, bounds);
+    }
+
