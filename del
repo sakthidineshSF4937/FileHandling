@@ -1,0 +1,2985 @@
+<template>
+  <div id="pdfViewer_parent" tabindex="0" style="height: 100%; position: relative; float: left; cursor: move;">
+    <ejs-pdfviewer
+      id="pdfviewer"
+      ref="pdfObj"
+      :serviceUrl="serviceUrl"
+      :documentLoad="pdfDocumentLoad"
+      :zoomChange="pdfZoomChange"
+      :pageChange="pdfPageChange"
+      :tileRenderingSettings="tileRenderingSettings"
+      :ajaxRequestSettings="ajaxRequestSettings"
+      :ajaxRequestInitiate="ajaxRequestInitiate"
+      :ajaxRequestSuccess="ajaxRequestSuccess"
+      :ajaxRequestFailed="ajaxRequestFailed"
+      :showNotificationDialog="false"
+      :restrictZoomRequest="false"
+    />
+    <ejs-tooltip v-if="showZoomOption && isDesktopMode" ref="zoomTooltipObj" :beforeRender="onZoomTooltipOpen" position="RightCenter" target="span">
+      <div class="bs-pdf-zoom-style">
+        <span id="zoomIn" class="sf-icon-Zoomin" @click="zoomIn" ></span>
+        <span id="zoomOut" class="sf-icon-Zoomout" @click="zoomOut" ></span>
+        <span id="fullScreen" class="sf-icon-Fit" @click="fullScreen" ></span>
+      </div>
+    </ejs-tooltip>
+    <PDFViewerFailedDialog ref="pdfViewerFailedDialogObj" :isFromDefaultPage="false" />
+  </div>
+</template>
+<script lang="ts">
+import { defineComponent, PropType } from 'vue';
+import { TooltipComponent } from '@syncfusion/ej2-vue-popups';
+import { PdfViewerComponent, Magnification, Navigation, PageChangeEventArgs, ZoomChangeEventArgs, PdfViewer } from '@syncfusion/ej2-vue-pdfviewer';
+import { decode } from '@msgpack/msgpack';
+import { UtilityMethods } from '../types/util';
+import { PageType, ResponsiveMode } from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import PDFViewerFailedDialog from '../components/pdfviewer-fail-dialog.vue';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+
+export default defineComponent({
+  name: 'PdfViewerRenderComponent',
+  components: {
+    'ejs-pdfviewer': PdfViewerComponent,
+    PDFViewerFailedDialog,
+    'ejs-tooltip': TooltipComponent
+  },
+
+  provide: {
+    PdfViewer: [Magnification, Navigation]
+  },
+  props: {
+    pageType: {
+      type: String as PropType<PageType>,
+      required: true
+    },
+    isPreviewPage: Boolean,
+    isPreviewTemplatePage: Boolean,
+    showZoomOption: Boolean,
+    isSigningPage: Boolean,
+    isLatestVersion: Boolean
+  },
+
+  emits: [
+    'drop',
+    'keydown',
+    'selectionChange',
+    'tabIndexChange',
+    'dropdownFocusOut',
+    'indexPositionChange',
+    'showSignatureInstance',
+    'formElementDragStart',
+    'formElementDragEnd',
+    'textChange',
+    'collectionChange',
+    'positionChange',
+    'sizeChange',
+    'formElementMouseOver',
+    'formElementMouseLeave',
+    'conditionalLogicSelectionChange',
+    'editAccessForFieldsInFormula',
+    'pdfDocumentLoad',
+    'pdfZoomChange',
+    'pdfPageChange',
+    'editFormElementsOnEnter',
+    'formElementInputChange',
+    'fontSizeChangeOnResize'
+  ],
+
+  data () {
+    // PdfViewer.Inject(Magnification, Navigation);
+    let serviceUrl = '/api/pdfviewer';
+    if (this.$session.embedData.isEmbedPage) {
+      serviceUrl = '/api/embeddedRequest';
+    } else if (this.$route.path.indexOf('configure-custom-field') > 0) {
+      const embeddedBrandDetails = UtilityMethods.getCustomFieldBrandAndEmbedIds(this.$route.query.brandId.toString());
+      if (embeddedBrandDetails.embedId) {
+        this.$mutation.updateCustomFieldData({ embeddedCustomFieldId: embeddedBrandDetails.embedId });
+        serviceUrl = '/api/embeddedCustomField';
+      } else {
+        serviceUrl = '/api/customField';
+      }
+    }
+    const canDisplayAIIcon = UtilityMethods.canEnableAIFieldDetection(this);
+    const PdfFormElement: PdfFormElements = new PdfFormElements(this.pageType, this.isPreviewPage, canDisplayAIIcon);
+    return {
+      isInit: false,
+      pdfViewerFailedDialogInstance: null,
+      PdfFormElement,
+      pdfViewer: PdfViewerComponent,
+      zoomFactor: 1.5,
+      serviceUrl,
+      tileRenderingSettings: { enableTileRendering: false },
+      ajaxRequestSettings: { ajaxHeaders: [{ headerName: 'x-xsrf-token', headerValue: this.$main.xsrfToken }] },
+      secretId: '',
+      isDesktopMode: this.$session.responsiveLayout.responsiveMode === ResponsiveMode.DesktopMode
+    };
+  },
+
+  mounted () {
+    this.$data.pdfViewerFailedDialogInstance = this.$refs.pdfViewerFailedDialogObj;
+    if (this.$refs.pdfObj) {
+      this.$data.PdfFormElement.pdfInstance = this.$refs.pdfObj.ej2Instances;
+      this.$data.PdfFormElement.drop = this.drop.bind(this);
+      this.$data.PdfFormElement.selectionChange = this.selectionChange.bind(this);
+      this.$data.PdfFormElement.tabIndexChange = this.tabIndexChange.bind(this);
+      this.$data.PdfFormElement.indexPositionChange = this.indexPositionChange.bind(this);
+      this.$data.PdfFormElement.dragStart = this.formElementDragStart.bind(this);
+      this.$data.PdfFormElement.dragEnd = this.formElementDragEnd.bind(this);
+      this.$data.PdfFormElement.dropdownFocusOut = this.dropdownFocusOut.bind(this);
+      this.$data.PdfFormElement.collectionChange = this.collectionChange.bind(this);
+      this.$data.PdfFormElement.positionChange = this.positionChange.bind(this);
+      this.$data.PdfFormElement.sizeChange = this.sizeChange.bind(this);
+      this.$data.PdfFormElement.textChange = this.textChange.bind(this);
+      this.$data.PdfFormElement.mouseover = this.formElementMouseOver.bind(this);
+      this.$data.PdfFormElement.mouseleave = this.formElementMouseLeave.bind(this);
+      this.$data.PdfFormElement.conditionalLogicSelectionChange = this.conditionalLogicSelectionChange.bind(this);
+      this.$data.PdfFormElement.showSignatureInstance = this.showSignatureInstance.bind(this);
+      this.$data.PdfFormElement.keydown = this.keydown.bind(this);
+      this.$data.PdfFormElement.editFormElementsOnEnter = this.editFormElementsOnEnter.bind(this);
+      this.$data.PdfFormElement.formElementInputChange = this.formElementInputChange.bind(this);
+      this.$data.PdfFormElement.editAccessForFieldsInFormula = this.editAccessForFieldsInFormula.bind(this);
+      this.$data.PdfFormElement.fontSizeChangeOnResize = this.fontSizeChangeOnResize.bind(this);
+    }
+    window.onresize = this.windowResize.bind(this);
+    this.pdfViewer = this.$refs.pdfObj as PdfViewerComponent;
+    if (this.pdfViewer) {
+      this.$data.pdfViewer.ej2Instances.scrollSettings = { delayPageRequestTimeOnScroll: 500 };
+      this.$data.pdfViewer.ej2Instances.beforeRenderPdfPage = this.pageRenderInitiate.bind(this);
+    }
+  },
+
+  methods: {
+    drop (args: any): void {
+      this.$emit('drop', args);
+    },
+
+    keydown (args: any): void {
+      this.$emit('keydown', args);
+    },
+
+    selectionChange (args: any): void {
+      this.$emit('selectionChange', args);
+    },
+
+    tabIndexChange (): void {
+      this.$emit('tabIndexChange');
+    },
+
+    dropdownFocusOut (args: any): void {
+      this.$emit('dropdownFocusOut', args);
+    },
+
+    indexPositionChange (args: any): void {
+      this.$emit('indexPositionChange', args);
+    },
+
+    showSignatureInstance (): void {
+      this.$emit('showSignatureInstance');
+    },
+
+    formElementDragStart (): void {
+      this.$emit('formElementDragStart');
+    },
+
+    formElementDragEnd (args: any): void {
+      this.$emit('formElementDragEnd', args);
+    },
+
+    textChange (args: any): void {
+      this.$emit('textChange', args);
+    },
+
+    fontSizeChangeOnResize (args: any) {
+      this.$emit('fontSizeChangeOnResize', args);
+    },
+
+    collectionChange (args: any): void {
+      this.$emit('collectionChange', args);
+    },
+
+    positionChange (args: any): void {
+      this.$emit('positionChange', args);
+    },
+
+    sizeChange (args: any): void {
+      this.$emit('sizeChange', args);
+    },
+
+    formElementMouseOver (args: any): void {
+      this.$emit('formElementMouseOver', args);
+    },
+
+    formElementMouseLeave (): void {
+      this.$emit('formElementMouseLeave');
+    },
+
+    conditionalLogicSelectionChange (args: any): void {
+      this.$emit('conditionalLogicSelectionChange', args);
+    },
+
+    editAccessForFieldsInFormula (args: any): void {
+      this.$emit('editAccessForFieldsInFormula', args);
+    },
+
+    pdfDocumentLoad (args: any): void {
+      this.isInit = true;
+      this.$emit('pdfDocumentLoad', args);
+    },
+
+    ajaxRequestSuccess (args: any) {
+      if (args.data && args.data.secretId) {
+        this.$data.secretId = args.data.secretId;
+        this.$mutation.updateMainData({ secretId: this.$data.secretId });
+      }
+    },
+
+    pdfZoomChange (args: ZoomChangeEventArgs): void {
+      if (this.isInit) {
+        this.PdfFormElement.scaleFormContainer(args.zoomValue);
+      }
+      this.$emit('pdfZoomChange');
+    },
+
+    pdfPageChange (args: PageChangeEventArgs): void {
+      this.$emit('pdfPageChange', args);
+    },
+
+    editFormElementsOnEnter (args: any): void {
+      this.$emit('editFormElementsOnEnter', args);
+    },
+
+    formElementInputChange (args: any): void {
+      this.$emit('formElementInputChange', args);
+    },
+
+    ajaxRequestInitiate (args: any): void {
+      this.pdfViewer.ej2Instances.ajaxRequestSettings.ajaxHeaders[0].headerValue = this.$main.xsrfToken;
+      this.pdfViewer.ej2Instances.httpResponseType = null;
+      const embedData: any = this.$session.embedData;
+      const mainData: any = this.$session.mainData;
+      if (args.JsonData.action === 'RenderPdfPages' || args.JsonData.action === 'Load' || args.JsonData.action === 'VirtualLoad' || args.JsonData.action === 'RenderTaggedContent') {
+        if (embedData.isEmbedPage) {
+          args.JsonData.signerId = embedData.embedId;
+          args.JsonData.documentIdData = embedData.documentId;
+          args.JsonData.embedId = embedData.embedId;
+          args.JsonData.organizationId = embedData.organizationId;
+        } else {
+          args.JsonData.signerId = mainData.currentUserId ? mainData.currentUserId : mainData.currentSignerId;
+        }
+        if (this.$session.mainData.signbuilderType === 'usetemplate') {
+          args.JsonData.templateId = this.$session.mainData.useTemplateDocumentId;
+        }
+        if (mainData.isEditCreatedTemplate) {
+          args.JsonData.templateId = mainData.editTemplateDocumentId;
+        }
+        if (this.isPreviewTemplatePage && this.$route.query.templateId) {
+          args.JsonData.templateId = this.$route.query.templateId.toString();
+        }
+        if (this.$session.mainData.signbuilderType === 'bulksend') {
+          args.JsonData.templateId = this.$session.bulkSendData.templateId;
+        }
+        if (this.$session.mainData.signbuilderType === 'createlink' || this.$session.mainData.isViewBulkLinkPage) {
+          args.JsonData.isLinkForms = true;
+          args.JsonData.linkId = mainData.editBulklinkId;
+        }
+        if (UtilityMethods.inEditMode(this) && !mainData.anySignerCompleted) {
+          args.JsonData.editDocumentId = mainData.editDocumentId;
+        }
+      }
+      if (args.JsonData.action === 'RenderPdfPages') {
+        if (this.isLatestVersion) {
+          args.JsonData.zoomFactor = this.$data.zoomFactor;
+        }
+        args.JsonData.secretId = this.$data.secretId;
+        this.pdfViewer.ej2Instances.httpResponseType = 'arraybuffer';
+        if (args.JsonData.zoomFactor === this.PdfFormElement.currentZoom) {
+          // this.updateFieldDisplay(args.JsonData.pageNumber, 'none');
+        }
+      }
+      if (args.JsonData.action === 'RenderTaggedContent') {
+        args.JsonData.secretId = this.$data.secretId;
+      }
+      if (this.pageType === 'EDIT') {
+        args.JsonData.isPrintSignDocument = true;
+        this.pdfViewer.setJsonData(args.JsonData);
+      }
+    },
+
+    pageRenderInitiate (args) {
+      const buffer = args.JsonData;
+      const obj = decode(buffer) as any;
+      obj.image = 'data:image/png;base64,' + this.arrayBufferToBase64(obj.image);
+      args.JsonData = obj;
+      args.JsonData.transformationMatrix = {
+        Elements: [1, 0, 0, 1, 0, 0],
+        OffsetX: 0,
+        OffsetY: 0,
+        IsInvertible: true,
+        IsIdentity: true
+      };
+      // this.updateFieldDisplay(args.JsonData.pageNumber, 'block');
+      this.pdfViewer.ej2Instances.renderPdfPages(args.JsonData);
+    },
+
+    arrayBufferToBase64 (buffer) {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return window.btoa(binary);
+    },
+
+    updateFieldDisplay (pageNumber: number, display: string) {
+      // if (this.pdfFormElement.pageFormElementsList && this.pdfFormElement.pageFormElementsList.length) {
+      //    let pageFormElement: PageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageNumber + 1);
+      //    if (pageFormElement && pageFormElement.formElements) {
+      //      let formElement: FormElement[] = pageFormElement.formElements.filter(x => x.visibility == true);
+      //      if (formElement && formElement.length > 0) {
+      //        for (var i = 0; i < pageFormElement.formElements.length; i++) {
+      //          let domFormElement: HTMLElement = document.getElementById(pageFormElement.formElements[i].id);
+      //          domFormElement.style.display = display;
+      //          if (this.pageType === 'SIGN' && this.pdfFormElement.selectedFormElement && display === 'block' &&
+      //              pageFormElement.formElements[i].id === this.pdfFormElement.selectedFormElement.id) {
+      //            this.$emit('renderSelectionTooltip', { elementType: this.pdfFormElement.selectedFormElement.elementType, element: domFormElement });
+      //          }
+      //        }
+      //      }
+      //    }
+      //  }
+    },
+
+    zoomIn (): void {
+      this.$nuxt.$userInsight.track(MixPanelAction.ZoominClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.ZoominAction, Origin: UserInsightOrigin.PrepareDocument }));
+      this.PdfFormElement.pdfInstance.magnification.zoomIn();
+    },
+
+    fullScreen (): void {
+      this.$nuxt.$userInsight.track(MixPanelAction.FitScreenClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.FitScreenAction, Origin: UserInsightOrigin.PrepareDocument }));
+      this.PdfFormElement.pdfInstance.magnification.fitToAuto();
+    },
+
+    zoomOut (): void {
+      this.$nuxt.$userInsight.track(MixPanelAction.ZoomOutClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.ZoomOutAction, Origin: UserInsightOrigin.PrepareDocument }));
+      this.PdfFormElement.pdfInstance.magnification.zoomOut();
+    },
+
+    ajaxRequestFailed (args: any): void {
+      console.log(args.action);
+      if (args.action !== "Unload") {
+        this.pdfViewerFailedDialogInstance.show(this.isSigningPage ? this.PdfFormElement : '');
+      }
+    },
+
+
+the above code pdfview vue file
+
+
+import { PdfFormElements } from '../types/pdfFormElements';
+import { FormElement, PageFormElements } from '../types/interface';
+import { UtilityMethods } from '../types/util';
+import ThumbnailComponent from '../components/thumbnail-component.vue';
+
+export class Accessibility {
+  private static pdfFormElement: PdfFormElements;
+  public static lastFocusedElement: any;
+  public static jsonDocumentContent: any;
+  private static context: any;
+  private static pdfFormElementClass = 'pdf-form-element';
+  private static accessibleHeaderIds = ['documentName', 'requiredMessage', 'languageDropDownSelect', 'moreActionSelect', 'completeSignButton', 'closeIcon', 'zoomIn', 'zoomOut', 'fullScreen'];
+  private static accessibleFormElementIds = [];
+  private static allAccessibleElementIdList = [];
+  public static thumbnailInstance: ThumbnailComponent = null;
+  private static formFieldKeysWithoutArgument = [
+    'requiredSignature', 'optionalSignature', 'requiredInitial', 'optionalInitial',
+    'requiredCheckbox', 'optionalCheckbox', 'requiredTextbox', 'optionalTextbox',
+    'requiredName', 'optionalName', 'requiredTitle', 'optionalTitle',
+    'requiredCompany', 'optionalCompany', 'requiredRadioOption', 'optionalRadioOption',
+    'requiredDropdown', 'optionalDropdown', 'requiredDate', 'optionalDate',
+    'requiredDropdownSelected', 'optionalDropdownSelected',
+    'hyperlink', 'checkboxChecked', 'checkboxNotChecked',
+    'signatureFilled', 'initialFilled', 'fillFormField'
+  ];
+
+  private static formFieldKeysWithArugument = [
+    'selectedRadioOption', 'dropdownSelected', 'dateFilled', 'imageUploaded',
+    'attachmentUploaded', 'textboxFilled', 'nameFilled', 'companyFilled',
+    'emailFilled', 'titleFilled', 'requiredAttachment', 'optionalAttachment',
+    'requiredImage', 'optionalImage'
+  ];
+
+  public static updateAccessibleElementIds (pdfFormElement: PdfFormElements, context: any) {
+    [this.pdfFormElement, this.context] = [pdfFormElement, context];
+    this.setAccessibilityAttributesForPDFPages();
+    this.allAccessibleElementIdList = [];
+    // Only adding the agree dialog element ids to focusing list when the agree dialog is visible.
+    if (context.agreeDialogVisible) {
+      this.getAgreeDialogAccessibleElementIds(context);
+      return;
+    }
+    // Adding the header, document content and form element ids to focusing list when the agree dialog is not visible.
+    this.getFormElementAccessibleElementIds();
+    this.getHeadersAccessibleElementIds(context);
+    if (this.jsonDocumentContent.documentDetails.isTaggedPdf && !this.pdfFormElement.allowConfigureFields) {
+      const focusableElementId = (this.thumbnailInstance && this.thumbnailInstance.isScreenReaderClicked) ? 'pdfviewer_accessibilityLayer' : 'screenReaderActivateBtn';
+      this.allAccessibleElementIdList = [...this.accessibleHeaderIds, focusableElementId, ...this.accessibleFormElementIds];
+    } else {
+      this.allAccessibleElementIdList = [...this.accessibleHeaderIds, ...this.accessibleFormElementIds];
+    }
+    if (this.thumbnailInstance && !this.thumbnailInstance.isScreenReaderClicked) {
+      const focusableElementId = this.thumbnailInstance.$data.showThumbContainer ? 'thumbnailsHeader' : 'expandThumbnail';
+      this.allAccessibleElementIdList = [...this.allAccessibleElementIdList, focusableElementId];
+    }
+  }
+
+  public static readDocumentContentForScreenReader () {
+    this.allAccessibleElementIdList = this.allAccessibleElementIdList.filter(x => x !== 'screenReaderActivateBtn');
+    const screenReaderActivateBtn = document.getElementById('screenReaderActivateBtn');
+    screenReaderActivateBtn.style.setProperty('visibility', 'hidden');
+    this.thumbnailInstance.screenReaderAccessibility(true);
+    this.focusElements('pdfviewer_accessibilityLayer');
+  }
+
+  private static getElementType (tagType: string): string {
+    switch (tagType) {
+      case 'Annotation':
+        return 'aside';
+      case 'Article':
+        return 'article';
+      case 'BibliographyEntry':
+        return 'cite';
+      case 'BlockQuotation':
+        return 'blockquote';
+      case 'Caption':
+        return 'caption';
+      case 'Code':
+        return 'code';
+      case 'Division':
+        return 'div';
+      case 'Document':
+        return 'section';
+      case 'Figure':
+        return 'figure';
+      case 'Form':
+        return 'form';
+      case 'Formula':
+        return 'math'; // Assuming a mathematical formula, you can customize this as needed.
+      case 'Heading':
+        return 'h';
+      case 'HeadingLevel1':
+        return 'h1';
+      case 'HeadingLevel2':
+        return 'h2';
+      case 'HeadingLevel3':
+        return 'h3';
+      case 'HeadingLevel4':
+        return 'h4';
+      case 'HeadingLevel5':
+        return 'h5';
+      case 'HeadingLevel6':
+        return 'h6';
+      case 'Index':
+        return 'ol'; // Assuming an ordered list for an index.
+      case 'Label':
+        return 'label';
+      case 'Link':
+        return 'a';
+      case 'List':
+        return 'ul';
+      case 'ListBody':
+        return 'ul'; // You can customize this as needed.
+      case 'ListItem':
+        return 'li';
+      case 'Note':
+        return 'aside'; // Assuming a note is an aside, but this can vary.
+      case 'Paragraph':
+        return 'p';
+      case 'Part':
+        return 'section';
+      case 'Private':
+        return 'div'; // Private can be a generic div.
+      case 'Quotation':
+        return 'q';
+      case 'Reference':
+        return 'ref'; // Assuming a reference element, customize as needed.
+      case 'Ruby':
+        return 'ruby';
+      case 'Section':
+        return 'section';
+      case 'Span':
+        return 'span';
+      case 'Table':
+        return 'table';
+      case 'TableBodyRowGroup':
+        return 'tbody';
+      case 'TableDataCell':
+        return 'td';
+      case 'TableFooterRowGroup':
+        return 'tfoot';
+      case 'TableHeader':
+        return 'th';
+      case 'TableHeaderRowGroup':
+        return 'thead';
+      case 'TableOfContent':
+        return 'nav'; // Assuming TOC as a navigation element.
+      case 'TableOfContentItem':
+        return 'li'; // TOC items as list items.
+      case 'TableRow':
+        return 'tr';
+      case 'Warichu':
+        return 'span'; // Assuming Warichu as a span, customize as needed.
+      case 'None':
+        return 'p'; // Return an empty string if no element is applicable.
+      default:
+        return 'div'; // Fallback to a div if no match is found.
+    }
+  }
+
+  private static createElement (elementData) {
+    const { X, Y, Width, Height } = elementData.Bounds;
+    const elementType = this.getElementType(elementData.TagType);
+    // Create an element based on the tag type
+    const element = document.createElement(elementType);
+    Object.assign(element.style, {
+      position: 'absolute',
+      left: `${X}px`,
+      top: `${Y}px`,
+      width: `${Width}px`,
+      height: `${Height}px`,
+      fontSize: '16px',
+      color: 'transparent',
+      fontFamily: 'serif',
+      transformOrigin: '0% center'
+    });
+
+    // Insert text into the element if available
+    if (elementData.Text) {
+      element.innerText = this.setFormElementContentForAccessibleLayer(elementData.Text);
+    }
+
+    return element;
+  }
+
+  private static setFormElementContentForAccessibleLayer (content: string) {
+    const hasArgument = this.formFieldKeysWithArugument.some(key => content.includes(`{accessibility.${key}}`));
+
+    if (hasArgument) {
+      const args = content.split('-');
+      const value = (args.length > 1) ? args[1] : '';
+      content = content.replace(`-${value}`, '');
+
+      // Replace keys with argument
+      this.formFieldKeysWithArugument.forEach((key) => {
+        content = content.replace(new RegExp(`{accessibility.${key}}`, 'g'), this.context.$t(`accessibility.${key}`, { value }));
+      });
+
+      return content;
+    }
+
+    // Replace keys without argument
+    this.formFieldKeysWithoutArgument.forEach((key) => {
+      content = content.replace(new RegExp(`{accessibility.${key}}`, 'g'), this.context.$t(`accessibility.${key}`));
+    });
+
+    return content;
+  }
+
+  private static processElement (elementData) {
+    const newElement = this.createElement(elementData);
+
+    // If there are child elements, process them recursively
+    if (elementData.ChildElements && elementData.ChildElements.length > 0) {
+      elementData.ChildElements.forEach((child) => {
+        // Process each child and append to the parent element
+        const childElement = this.processElement(child);
+        newElement.appendChild(childElement);
+      });
+    }
+
+    return newElement;
+  }
+
+  public static renderPDFContentLayer (data) {
+    const pdfViewerContainer = document.getElementById('pdfviewer_pageViewContainer');
+    if (!pdfViewerContainer) {
+      return;
+    }
+    const accessibilityLayer = document.createElement('div');
+    accessibilityLayer.id = 'pdfviewer_accessibilityLayer';
+    accessibilityLayer.tabIndex = 0;
+    const pageCount = (this.jsonDocumentContent.documentDetails.documentProperties || []).reduce(
+      (total, documentProperty) => total + documentProperty.pageCount,
+      0
+    );
+
+    for (let index = 1; index <= pageCount; index++) {
+      const container = document.createElement('div');
+      container.id = `pdfviewer_taggedLayer_${index}`;
+      container.classList.add('e-pv-tagged-layer', 'e-pv-text-layer');
+      container.style.width = '100%';
+      container.style.height = '100%';
+      container.style.pointerEvents = 'none';
+      const currentPage = data.filter(x => x.PageNumber === index);
+      if (currentPage.length > 0) {
+        const documentLabelElement = this.createDocumentLabelElement(index);
+        container.appendChild(documentLabelElement);
+      }
+      currentPage.forEach((item) => {
+        const { X, Y, Width, Height } = item.Bounds;
+        const element = document.createElement('div');
+        element.className = 'e-pv-text';
+        element.tabIndex = -1;
+        element.id = `pdfviewer_taggedText_${index}_${item.Order}`;
+        Object.assign(element.style, {
+          display: 'inline',
+          left: `${X}px`,
+          top: `${Y}px`,
+          width: `${Width}px`,
+          height: `${Height}px`,
+          fontSize: '16px',
+          color: 'transparent',
+          fontFamily: 'serif',
+          transformOrigin: '0% center'
+        });
+
+        const processedElement = this.processElement(item);
+        element.appendChild(processedElement);
+
+        if (element) {
+          container.appendChild(element);
+        }
+      });
+
+      accessibilityLayer.appendChild(container);
+    }
+    pdfViewerContainer.appendChild(accessibilityLayer);
+  }
+
+  private static createDocumentLabelElement (index) {
+    const documentLabelElement = document.createElement('div');
+    const documentProperties = this.jsonDocumentContent.documentDetails.documentProperties;
+
+    let cumulativePages = 0;
+
+    // Find the document property and calculate the relative page number
+    for (let i = 0; i < documentProperties.length; i++) {
+      const currentProperty = documentProperties[i];
+      cumulativePages += currentProperty.pageCount;
+
+      if (index <= cumulativePages) {
+        const relativePageNumber = index - (cumulativePages - currentProperty.pageCount);
+        const documentName = currentProperty.documentName;
+        documentLabelElement.innerText = this.context.$t('accessibility.pageLabel', { documentName, currentPage: relativePageNumber, totalPage: currentProperty.pageCount });
+        break;
+      }
+    }
+
+    // Apply styles to the document label element
+    Object.assign(documentLabelElement.style, {
+      display: 'inline',
+      left: '0px',
+      top: '0px',
+      width: '10px',
+      height: '10px',
+      fontSize: '16px',
+      color: 'transparent',
+      fontFamily: 'serif',
+      transformOrigin: '0% center'
+    });
+
+    return documentLabelElement;
+  }
+
+  public static documentKeyEventListener (event: KeyboardEvent): void {
+    if (event.keyCode !== 9) { return; }
+    event.preventDefault();
+    const isShiftTab = event.shiftKey;
+    let nextFocusingElementId = '';
+
+    // Logic to navigate between header, document content and form elements front and back with TAB and SHIFT+TAB respectively.
+    if (!nextFocusingElementId) {
+      if (this.lastFocusedElement) {
+        const currentFocusedElementIndex = this.allAccessibleElementIdList.findIndex(id => id === this.lastFocusedElement.id);
+        let nextFocusingElementIndex = 0;
+        if (isShiftTab) {
+          nextFocusingElementIndex = (currentFocusedElementIndex - 1 + this.allAccessibleElementIdList.length) % this.allAccessibleElementIdList.length;
+        } else {
+          nextFocusingElementIndex = (currentFocusedElementIndex + 1) % this.allAccessibleElementIdList.length;
+        }
+        nextFocusingElementId = this.allAccessibleElementIdList[nextFocusingElementIndex];
+      } else {
+        nextFocusingElementId = isShiftTab ? this.allAccessibleElementIdList[this.allAccessibleElementIdList.length - 1] : this.allAccessibleElementIdList[0];
+      }
+    }
+    this.focusElements(nextFocusingElementId);
+  }
+
+  public static focusElements (nextFocusingElementId: string) {
+    this.pdfFormElement.formRendering.svgContext.clearSelector();
+    this.clearTabSelection();
+    let focusingElement = this.lastFocusedElement = document.getElementById(nextFocusingElementId);
+    if (focusingElement) {
+      if (focusingElement.classList.contains(this.pdfFormElementClass) || focusingElement.classList.contains('pdf-child-form-element')) {
+        this.pdfFormElement.focusFormElement(this.pdfFormElement.getFormElementById(focusingElement.id));
+      } else {
+        if (nextFocusingElementId === 'agreeCheckbox') {
+          const spanElement = document.querySelector('#agreeCheckbox + span.e-frame');
+          if (spanElement) {
+            spanElement.classList.add('bs-tabSelection');
+          }
+        } else if (nextFocusingElementId !== 'pdfviewer_accessibilityLayer') {
+          focusingElement.classList.add('bs-tabSelection');
+        }
+        this.context.$eventBus.emit('hideCustomButton');
+        if (focusingElement.id === 'completeSignButton' && focusingElement.children[0]) {
+          focusingElement = focusingElement.children[0] as HTMLElement;
+        }
+      }
+      if (nextFocusingElementId === 'screenReaderActivateBtn') {
+        focusingElement.style.setProperty('visibility', 'visible');
+      } else {
+        this.hideScreenReaderButton();
+      }
+      if (['zoomIn', 'zoomOut', 'fullScreen', 'closeIcon', 'screenReaderActivateBtn'].includes(nextFocusingElementId) && UtilityMethods.isFirefoxBrowser()) {
+        this.setAriaLabelForScalingButtons(focusingElement);
+      }
+      focusingElement.focus();
+    }
+  }
+
+  public static focusDocumentNameAfterAgreeDialogClose () {
+    this.clearTabSelection();
+    setTimeout(() => {
+      const focusingElement = document.getElementById('documentName');
+      if (focusingElement) {
+        focusingElement.focus();
+      }
+    }, 100);
+  }
+
+  public static setAccessibilityAttributesAfterPageLoad () {
+    const agreeDesktopDialog = document.getElementById('agreeDesktopDialog');
+    const agreeCheckBox = document.querySelector('.bs-agree-checkbox .e-checkbox-wrapper');
+    if (agreeDesktopDialog) {
+      agreeDesktopDialog.removeAttribute('aria-describedby');
+      agreeDesktopDialog.removeAttribute('aria-modal');
+      agreeDesktopDialog.setAttribute('tabindex', '0');
+      agreeDesktopDialog.focus(); // To focus on the agree terms and conditions dialog after the page loaded
+    }
+    if (agreeCheckBox) {
+      agreeCheckBox.removeAttribute('role');
+      agreeCheckBox.removeAttribute('aria-checked');
+    }
+  }
+
+  public static setAccessibilityAttributesForFormElement (formElement: FormElement, domElement: any, context: any = null) {
+    if (!context) { context = this.context; }
+    if (!context) { return; }
+    const { elementType, isRequired, value, imageInfo, attachmentInfo, label } = formElement;
+    const defaultValue = value !== null ? value : '';
+    let ariaLabel = '';
+    let role = 'button';
+
+    if (elementType !== 'datepicker' && elementType !== 'email') {
+      domElement.setAttribute('tabindex', '0');
+
+      switch (elementType) {
+        case 'signature':
+          ariaLabel = value
+            ? `${isRequired ? context.$t('accessibility.requiredSignatureApplied') : context.$t('accessibility.optionalSignatureApplied')}`
+            : `${isRequired ? context.$t('accessibility.requiredSignature') : context.$t('accessibility.optionalSignature')}`;
+          break;
+
+        case 'initial': {
+          ariaLabel = value
+            ? `${isRequired ? context.$t('accessibility.requiredInitialApplied') : context.$t('accessibility.optionalInitialApplied')}`
+            : `${isRequired ? context.$t('accessibility.requiredInitial') : context.$t('accessibility.optionalInitial')}`;
+          break;
+        }
+
+        case 'textbox':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredTextbox') : context.$t('accessibility.optionalTextbox')}`;
+          break;
+
+        case 'checkbox':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredCheckbox') : context.$t('accessibility.optionalCheckbox')} - ${formElement.label}`;
+          domElement.setAttribute('aria-checked', value === 'on' ? 'true' : 'false');
+          role = 'checkbox';
+          break;
+
+        case 'radiobutton':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredRadioOption') : context.$t('accessibility.optionalRadioOption')}`;
+          formElement.children.forEach((child, index) => {
+            const element = document.getElementById(child.id);
+            if (element) {
+              element.setAttribute('aria-label', `${context.$t('accessibility.radioOptionSelected')} ${child.label}`);
+              element.setAttribute('role', 'radio');
+              element.setAttribute('aria-checked', child.value === 'on' ? 'true' : 'false');
+              element.setAttribute('tabindex', '-1');
+            }
+          });
+          break;
+
+        case 'image':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredImage', { value: imageInfo.title }) : context.$t('accessibility.optionalImage', { value: imageInfo.title })}`;
+          break;
+
+        case 'attachment':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredAttachment', { value: attachmentInfo.title }) : context.$t('accessibility.optionalAttachment', { value: attachmentInfo.title })}`;
+          break;
+
+        case 'dropdown':
+          ariaLabel = value ? `${isRequired ? context.$t('accessibility.requiredDropdownSelected') : context.$t('accessibility.optionalDropdownSelected')} - ${value}` : `${isRequired ? context.$t('accessibility.requiredDropdown') : context.$t('accessibility.optionalDropdown')}`;
+          break;
+
+        case 'editabledate':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredDate') : context.$t('accessibility.optionalDate')} ${defaultValue}`;
+          break;
+
+        case 'name':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredName') : context.$t('accessibility.optionalName')}`;
+          break;
+
+        case 'title':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredTitle') : context.$t('accessibility.optionalTitle')}`;
+          break;
+
+        case 'company':
+          ariaLabel = `${isRequired ? context.$t('accessibility.requiredCompany') : context.$t('accessibility.optionalCompany')}`;
+          break;
+
+        case 'hyperlink':
+          ariaLabel = `${context.$t('accessibility.hyperlink')} - ${label}`;
+          role = 'link';
+          break;
+      }
+
+      domElement.setAttribute('aria-label', ariaLabel);
+      domElement.setAttribute('role', role);
+    }
+  }
+
+  public static setAriaLabelForScalingButtons (focusingElement: HTMLElement) {
+    const ariaLabel = this.getAriaLabelContentForElements(focusingElement.id, this.context);
+    focusingElement.setAttribute('aria-label', ariaLabel);
+  }
+
+  public static setAccessibilityAttributesForPDFPages () {
+    const pdfViewerElement = document.getElementById('pdfviewer_pageViewContainer');
+    if (pdfViewerElement) {
+      pdfViewerElement.tabIndex = this.context.authenticationVisible ? -1 : 0;
+      pdfViewerElement.removeAttribute('aria-label');
+    }
+  }
+  public static isAnyDialogOpen () {
+    const allDialogs = Array.from(document.getElementsByClassName('e-dlg-container')) as HTMLElement[];
+    return allDialogs.some(x => x && x.style && x.style.display === 'flex');
+  }
+
+  public static filterThumbnailElementIds (showThumbContainer: boolean) {
+    if (showThumbContainer) {
+      this.allAccessibleElementIdList.push('thumbnailsHeader');
+      this.allAccessibleElementIdList = this.allAccessibleElementIdList.filter(id => id !== 'expandThumbnail');
+      this.lastFocusedElement = document.getElementById('thumbnailsHeader');
+    } else {
+      this.allAccessibleElementIdList = this.allAccessibleElementIdList.filter(
+        id => id !== 'thumbnailsHeader' && id !== 'expandThumbnail'
+      );
+      if (this.thumbnailInstance && !this.thumbnailInstance.isScreenReaderClicked) {
+        this.allAccessibleElementIdList.push('expandThumbnail');
+        this.lastFocusedElement = document.getElementById('expandThumbnail');
+      }
+    }
+  }
+
+  public static hideScreenReaderButton () {
+    const screenReaderActivateBtn = document.getElementById('screenReaderActivateBtn');
+    if (screenReaderActivateBtn) {
+      screenReaderActivateBtn.style.setProperty('visibility', 'hidden');
+    }
+  }
+
+  public static addTabSelectionToDialog (event: any) {
+    this.clearTabSelection();
+    // Used set timeout to get the element which going to be focused
+    setTimeout(() => {
+      let focusedElement: any = document.activeElement;
+      // To avoid focus out from the dialogs without footer buttons like more info dialog & shortcuts dialog
+      const openDialogs = document.querySelectorAll('.e-dlg-container .e-popup-open');
+      if (openDialogs && openDialogs.length > 0) {
+        for (let i = 0; i < openDialogs.length; i++) {
+          const dialog = openDialogs[i] as HTMLElement;
+          if (dialog && !dialog.contains(focusedElement) && dialog.id !== 'agreeDesktopDialog') {
+            dialog.focus();
+            return;
+          }
+        }
+      }
+      if (focusedElement && event.keyCode !== 13 && !focusedElement.classList.contains('e-input')) {
+        // To add tab selection to the close icon in case of focused element was close icon button
+        if (focusedElement.classList.contains('e-dlg-closeicon-btn')) {
+          focusedElement = focusedElement.querySelector('.e-icon-dlg-close');
+        } else if (focusedElement.classList.contains('e-checkbox')) { // for adding tab selection to the checkbox correctly
+          focusedElement = focusedElement.nextSibling;
+        }
+
+        if (focusedElement) {
+          focusedElement.classList.add('bs-tabSelection');
+        }
+      }
+    }, 0);
+import { defineComponent, createApp } from 'vue';
+import { PdfViewerComponent, PageChangeEventArgs } from '@syncfusion/ej2-vue-pdfviewer';
+import { Internationalization } from '@syncfusion/ej2-base';
+import { BeforeOpenCloseMenuEventArgs, MenuEventArgs, ContextMenuComponent } from '@syncfusion/ej2-vue-navigations';
+import { DatePicker, PopupObjectArgs, DatePickerComponent } from '@syncfusion/ej2-vue-calendars';
+import { DropDownListComponent } from '@syncfusion/ej2-vue-dropdowns';
+import { ButtonComponent } from '@syncfusion/ej2-vue-buttons';
+import { TextBoxComponent } from '@syncfusion/ej2-vue-inputs';
+import { DialogComponent } from '@syncfusion/ej2-vue-popups';
+import { useHead } from 'nuxt/app';
+import Signature from '../components/sidebar/signature-component.vue';
+import ThumbnailComponent from '../components/thumbnail-component.vue';
+import PDFViewerRenderComponent from '../components/pdfviewer-render-component.vue';
+import PrepareProgressTemplate from '../components/prepare-progress-template.vue';
+import {
+  FormElement,
+  PageFormElements,
+  DocumentProperties,
+  SignType,
+  PageInfo,
+  ConditionalRule,
+  ResponsiveMode,
+  ResponsivePageType, TourAction, PageName, AiFieldDetectStatus
+} from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import { CustomEventHandler } from '../types/interaction';
+import { UtilityMethods } from '../types/util';
+import itemVue from '../components/prepare-page-dropdown.vue';
+import CustomToast from '../components/custom-toast.vue';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+import ImageTemplate from '../components/image-template.vue';
+import RemoveImageWarning from '../components/remove-image-warning.vue';
+import { ConditionalLogicMethods } from '../types/conditional-logic';
+import AdvanceSettings from '../components/advance-settings/advance-settings.vue';
+import FieldContainerComponent from '../components/field-container.vue';
+import MobileContextMenu from '../components/mobile-context-menu.vue';
+import MobileFieldContainerComponent from '../components/mobile-field-container.vue';
+import * as signalR from "@microsoft/signalr";
+import { SignalRLogger } from '../types/iLogger';
+
+export default defineComponent({
+  name: 'PreparePage',
+  components: {
+    'ejs-dropdownlist': DropDownListComponent,
+    'ejs-button': ButtonComponent,
+    'ejs-textbox': TextBoxComponent,
+    'ejs-contextmenu': ContextMenuComponent,
+    'ejs-dialog': DialogComponent,
+    'ejs-datepicker': DatePickerComponent,
+    PrepareProgressTemplate,
+    Signature,
+    MobileFieldContainerComponent,
+    MobileContextMenu,
+    CustomToast,
+    ThumbnailComponent,
+    FieldContainerComponent,
+    AdvanceSettings,
+    PDFViewerRenderComponent,
+    ImageTemplate,
+    RemoveImageWarning
+  },
+
+  data () {
+    const context = this as any;
+    const app = createApp({});
+    const iTemplate = app.component('ItemVue', itemVue);
+    const isDesktopMode: boolean = this.$session.responsiveLayout.responsiveMode === ResponsiveMode.DesktopMode;
+    const isMobileMode: boolean = this.$session.responsiveLayout.responsiveMode === ResponsiveMode.MobileMode;
+    const signbuilderType: string = this.$session.mainData.signbuilderType;
+    const signerDetails: any = UtilityMethods.getSignerDetails(this.$session.signerData.signerDetails);
+    const defaultSignerDetails: any = UtilityMethods.getDefaultSignerDetail(this);
+    let assigneeTextField: string = 'customSignerName';
+    const datePickerPopUpX: number = 0;
+    const datePickerPopUpY: number = 0;
+    if (signbuilderType === 'createtemplate' || signbuilderType === 'createlink' || signbuilderType === 'usetemplate') {
+      assigneeTextField = 'signerRole';
+    }
+    if (this.$session.embedData.isEmbedPage) {
+      this.$mutation.updateMainData({ showProgress: false });
+    }
+    return {
+      datePickerPopUpX,
+      datePickerPopUpY,
+      lastInterval: null as NodeJS.Timeout,
+      customFieldsInterval: null as NodeJS.Timeout,
+      signatureInstance: null as any,
+      initialInstance: null as any,
+      thumbnailInstance: null as any,
+      pdfRenderInstance: null as any,
+      fieldContainerInstance: null as any,
+      advanceSettingsInstance: null as any,
+      imageInstance: null as any,
+      removeImageInstance: null as any,
+      conditionalLogicMethods: new ConditionalLogicMethods(),
+      globalize: new Internationalization(),
+      signatureDetails: null as any,
+      lastSavedSignature: {},
+      lastSavedInitial: {},
+      customEvent: CustomEventHandler,
+      isDocumentLoaded: false,
+      dropdownObjInstance: null as any,
+      datePickerObjInstance: DatePicker,
+      doubleTabDetected: false,
+      eventListeners: [
+        { event: 'showSkeleton', handler: this.showSkeleton },
+        { event: 'hideSkeleton', handler: this.hideSkeleton },
+        { event: 'confirmDeleteImageDialog', handler: this.confirmDeleteImageDialog },
+        { event: 'resizePDFViewer', handler: this.resizePDFViewer },
+        { event: 'imageBtnClick', handler: this.imageBtnClick },
+        { event: 'closeAdvance', handler: this.closeAdvance },
+        { event: 'getConditionalLogicConfirmationDialogContent', handler: this.getConditionalLogicConfirmationDialogContent },
+        { event: 'updateConditionalRuleDefaultDialogButton', handler: this.updateConditionalRuleDefaultDialogButton },
+        { event: 'hideDropdownConfirmationDialog', handler: this.HideDropdownConfirmationDialog },
+        { event: 'showAdvanceSettings', handler: this.updateAdvanceSettingsVariables },
+        { event: 'conditionalLogicCreateOrCancelAction', handler: this.conditionalLogicCreateOrCancelAction },
+        { event: 'confirmationDialogButtonForDropdownOptionsEdit', handler: this.confirmationDialogButtonForDropdownOptionsEdit },
+        { event: 'confirmationDialogButtonForDropdownOptionsDelete', handler: this.confirmationDialogButtonForDropdownOptionsDelete },
+        { event: 'showAnchorTxtConfigDltConfirmDlg', handler: this.showAnchorTxtConfigDltConfirmDlg },
+        { event: 'updateAnchorTextVal', handler: this.updateAnchorTextVal },
+        { event: 'updateCanEditCustomField', handler: this.updateCanEditCustomField },
+        { event: 'updateAssigneeForCustomFields', handler: this.updateAssigneeForCustomFields },
+        { event: 'updateCustomFieldId', handler: this.updateCustomFieldId },
+        { event: 'hideRightSideBar', handler: this.hideRightSideBar },
+        { event: 'showRightSideBar', handler: this.showRightSideBar },
+        { event: 'updateAssigneeForCustomFields', handler: this.updateAssigneeForCustomFields },
+        { event: 'updateSignatureImageForSelfSign', handler: this.updateSignatureImageForSelfSign },
+        { event: 'updateCustomFieldButtonContent', handler: this.updateCustomFieldButtonContent },
+        { event: 'saveCustomFieldBtnClick', handler: this.saveCustomFieldBtnClick },
+        { event: 'saveEditedCustomField', handler: this.saveEditedCustomField },
+        { event: 'mobileContextMenuSelection', handler: this.mobileContextMenuSelection },
+        { event: 'getVisibilityOfTooltipDialog', handler: this.getVisibilityOfTooltipDialog },
+        { event: 'isSharableFormField', handler: this.isSharableFormField },
+        { event: 'updateInitialAssignee', handler: this.updateInitialAssignee },
+        { event: 'fetchAIFieldDetails', handler: this.fetchAIFieldDetails },
+        { event: 'aiFieldDropDownSelect', handler: this.aiFieldDropDownSelect },
+        { event: 'stopAiFieldProcess', handler: this.stopAiFieldProcess },
+      ],
+      signalRInstance: null as signalR.HubConnection,
+      value: 'sign3.png',
+      height: '440px',
+      width: '638px',
+      header: 'Draw Signature',
+      serviceUrl: '/api/pdfviewer',
+      pdfFormElement: this.pdfFormElement,
+      customToastObj: this.customToastObj,
+      isSharedFieldSelected: this.isSharedFieldSelected,
+      visible: false,
+      isCustomFieldLoaded: false,
+      selectedRecipients: defaultSignerDetails.id,
+      assigneeFields: {
+        text: assigneeTextField,
+        value: 'id'
+      },
+      deleteConditionDlgButtons: [
+        {
+          buttonModel: { content: context.$t('common.cancel'), cssClass: 'e-flat' },
+          click: this.hideDeleteDialog.bind(this)
+        },
+        {
+          buttonModel: { content: context.$t('common.continue'), cssClass: 'e-danger e-flat' },
+          click: this.confirmDeleteDialog.bind(this)
+        }
+      ],
+      anchorTxtConfigDeleteDlgButtons: [
+        {
+          buttonModel: { content: context.$t('common.cancel'), cssClass: 'e-flat' },
+          click: this.closeAnchorTxtConfigDeleteDlg.bind(this)
+        },
+        {
+          buttonModel: { content: context.$t('common.delete'), cssClass: 'e-flat e-danger', isPrimary: true },
+          click: this.deleteAnchorTxtConfiguration.bind(this)
+        }
+      ],
+      conditionalPlaceHolder: context.$t('preparePage.conditionalPlaceHolder'),
+      conditionalLogicConfirmationDialogContent: '',
+      conditionalLogicDataSource: [],
+      conditionalDropdownText: '',
+      selectedConditionalRule: this.$session.advanceSettings.selectedConditionalRule,
+      isFormulaConditionalField: false,
+      isConditionalPage: false,
+      deleteConditionDialogVisible: false,
+      anchorTxtConfigDeleteDlgVisibility: false,
+      dropdownValue: this.$session.advanceSettings.dropdownValue,
+      anchorTxtValidationMsg: '',
+      dateFormat: UtilityMethods.getDateFormat(this.$session),
+      timeFormat: UtilityMethods.getTimeFormat(this.$session),
+      showTodayButton: false,
+      selectAssigneePlaceholder: context.$t('preparePage.selectAssigneePlaceholder'),
+      showAdvanceFields: false,
+      selectedElementType: 'signature',
+      showThumbContainer: true,
+      anchorTextVal: this.$session.advanceSettings.anchorTextVal,
+      isDesktopMode,
+      isMobileMode,
+      formMenuItems: [
+        {
+          text: context.$t('preparePage.changeSignMenuItem'),
+          id: 'change_sign_item',
+          iconCss: 'bs-change-sign-icon'
+        },
+        {
+          text: context.$t('preparePage.changeImageMenuItem'),
+          id: 'change_image_item',
+          iconCss: 'bs-change-sign-icon'
+        },
+        {
+          text: context.$t('preparePage.clearMenuItem'),
+          id: 'clear_item',
+          iconCss: 'bs-clear-icon'
+        },
+        {
+          text: context.$t('preparePage.duplicate'),
+          id: 'duplicate_item',
+          iconCss: 'bs-dupicate-fields-icon'
+        },
+        { separator: true },
+        {
+          text: context.$t('preparePage.cut'),
+          id: 'cut_item',
+          iconCss: 'bs-cut-icon'
+        },
+        {
+          text: context.$t('preparePage.copy'),
+          id: 'copy_item',
+          iconCss: 'bs-copy-icon'
+        },
+        {
+          text: context.$t('preparePage.paste'),
+          id: 'paste_item',
+          iconCss: 'bs-paste-icon'
+        },
+        {
+          text: context.$t('preparePage.pasteHereMenuItem'),
+          id: 'pastehere_item',
+          iconCss: 'bs-paste-icon'
+        },
+        {
+          text: context.$t('preparePage.replicateToAllPages'),
+          id: 'apply_to_all_pages_item',
+          iconCss: 'bs-replicateToAllPage-icon'
+        },
+        { separator: true },
+        {
+          text: context.$t('common.delete'),
+          id: 'delete_item',
+          iconCss: 'bs-delete-icon'
+        },
+        {
+          text: context.$t('settings'),
+          id: 'settings_item',
+          iconCss: 'sf-icon-Setting'
+        }
+      ],
+      conditionalFields: { text: 'text', value: 'value' },
+      pageNoList: [],
+      hasPdfFormFields: false,
+      currentDropdownOptions: [],
+      showDropdown: false,
+      dropdownPlaceholder: context.$t('common.dropdownTxt'),
+      dropdownFields: {
+        text: 'value',
+        value: 'value'
+      },
+      dropdownPopUpX: 0,
+      dropdownPopUpY: 0,
+      dropdownWidth: 0,
+      datePickerValue: this.$session.advanceSettings.datePickerValue,
+      minDate: this.$session.advanceSettings.minDate,
+      maxDate: this.$session.advanceSettings.maxDate,
+      classToAnimatePropertyPanel: '',
+      isHiddenThumbContainer: false,
+      isFieldsUpdated: false,
+      allDocPageIndexNeeded: false,
+      signerDetails,
+      isPdfDocLoaded: false,
+      isTemplatePage: false,
+      showMobileContextMenu: false,
+      contextMenuX: 0,
+      contextMenuY: 0,
+      mobileContextMenuItems: {},
+      showSkeletonProgress: false,
+      tooltipContent: this.$session.mainData.isSelfSign ? context.$t('preparePage.selfSignToolTipContent') : context.$t('preparePage.toolTipContent'),
+      tooltipDlgVisibility: false,
+      isLatestVersion: false,
+      isEmbedPage: this.$session.embedData.isEmbedPage,
+      signbuilderType,
+      iTemplate: function () {
+        return {
+          template: iTemplate
+        };
+      },
+      closeOnEscape: true,
+      aiFieldDetectionConfirmationVisible: false,
+      isModal: true,
+      animationSettings: { effect: 'none' },
+      target: document.body,
+      aiFieldDetectionConfirmationButtons: [
+        {
+          buttonModel: { content: context.$t('common.cancel'), cssClass: 'e-flat' },
+          click: this.cancelFieldDetect.bind(this),
+        },
+        {
+          buttonModel: { content: context.$t('preparePage.startPlaceFieldsBtnContent'), cssClass: 'e-flat', isPrimary: true },
+          click: this.startPlaceFieldsClick.bind(this),
+        },
+      ],
+      aiImageAlt: context.$t('accessibility.infoImageAlt'),
+      aiFieldPlaceConfirmationDlgHeader: context.$t('preparePage.aiFieldPlaceConfirmationDlgHeader'),
+      aiDialogDescription: context.$t('preparePage.aiDialogDescription'),
+      aiDialogNote: context.$t('preparePage.aiDialogNote'),
+      aiFieldDetectionErrorDlgVisible: false,
+      aiFieldDetectionErrorDlgHeader: context.$t('preparePage.aiFieldDetectionErrorDlgHeader'),
+      aiFieldDetectionErrorDlgDescription: context.$t('preparePage.aiFieldDetectionErrorDlgDescription'),
+      aiFieldDetectionErrorDlgButtons: [
+        {
+          buttonModel: { content: context.$t('common.cancel'), cssClass: 'e-flat' },
+          click: this.aiFieldErrorDialogBtnClick.bind(this),
+        },
+        {
+          buttonModel: { content: context.$t('preparePage.addMyOwnBtnContent'), cssClass: 'e-flat', isPrimary: true },
+          click: this.aiFieldErrorDialogBtnClick.bind(this),
+        },
+      ],
+      isSignalRProcessCompleted: false,
+      removeAiFieldConfirmationDlg: false,
+      removeAiFieldConfirmationDlgButtons: [
+        {
+          buttonModel: { content: context.$t('preparePage.keepFieldsText'), cssClass: 'e-flat' },
+          click: this.keepFieldsBtnClick.bind(this),
+        },
+        {
+          buttonModel: { content: context.$t('preparePage.removeFieldsBtnText'), cssClass: 'e-flat', isPrimary: true },
+          click: this.removeFieldsBtnTextClick.bind(this),
+        },
+      ],
+      fieldDetectStatus: '',
+    };
+  },
+
+  beforeUnmount (): void {
+    document.body.removeEventListener('click', this.documentClickListener);
+    window.removeEventListener('touchstart', this.touchStart);
+    window.removeEventListener('touchmove', this.touchMove);
+    window.removeEventListener('touchend', this.touchEnd);
+    const parentElement: HTMLElement = document.getElementsByClassName('bs-prepare-page')[0] as HTMLElement;
+    parentElement.style.display = 'none';
+  },
+
+  mounted () {
+    useHead({ title: this.$t('metaInfo.preparePageMetaInfo') });
+    this.eventListeners.forEach(({ event, handler }) => {
+      this.$eventBus.on(event, handler);
+    });
+    this.$mutation.updateResponsiveLayout({ currentPageType: ResponsivePageType.PreparePage, previousPage: ResponsivePageType.DocumentSettings });
+    this.$data.isLatestVersion = UtilityMethods.isLatestVersionedDocument(this.$session.mainData.documentVersion);
+    document.body.addEventListener('click', this.documentClickListener);
+    window.addEventListener('touchstart', this.touchStart, { passive: false });
+    window.addEventListener('touchmove', this.touchMove);
+    window.addEventListener('touchend', this.touchEnd);
+    this.signatureInstance = this.$refs.signatureObj;
+    this.initialInstance = this.$refs.initialObj;
+    this.thumbnailInstance = this.$refs.thumbnailObj;
+    this.pdfRenderInstance = this.$refs.pdfRenderObj;
+    this.imageInstance = this.$refs.imageObj;
+    this.removeImageInstance = this.$refs.removeImageRef;
+    this.dropdownObjInstance = this.$refs.dropDownFormFieldObj;
+    if (!this.$data.isDesktopMode) {
+      this.fieldContainerInstance = this.$refs.mobileFieldContainerObj;
+    } else {
+      this.fieldContainerInstance = this.$refs.fieldContainerObj;
+    }
+    this.datePickerObjInstance = this.$refs.datePickerObj.ej2Instances;
+    this.pdfFormElement = this.pdfRenderInstance.PdfFormElement;
+    this.pdfFormElement.isEditDocument = UtilityMethods.inEditMode(this);
+    this.advanceSettingsInstance = this.$refs.advanceSettingsObj;
+    this.customToastObj = this.$refs.customToast;
+    this.pdfFormElement.enableFieldEditing = !!((this.$session.mainData.isSelfSign && this.$data.signbuilderType !== 'createtemplate'));
+    document.ondblclick = this.documentDoubleClick.bind(this);
+    this.$mutation.updateMainData({ prepareProgress: true, anchorTxtConfigSectionVisibility: false });
+    this.$mutation.updateMainData({ enableNextPage: this.$data.signbuilderType === 'createtemplate' });
+
+    if (this.pdfFormElement.enableFieldEditing && !this.$session.embedData.isEmbedPage) {
+      this.$nuxt.$api.common.getSignatureDetails({}).then((data) => {
+        this.signatureDetails = data;
+      });
+      for (const formElement of this.fieldContainerInstance.formElements) {
+        formElement.isRequired = false;
+        if (formElement.elementType === 'checkbox') {
+          formElement.value = 'on';
+        } else if (formElement.elementType === 'title') {
+          formElement.value = this.$session.mainData.jobTitle;
+        } else if (formElement.elementType === 'company') {
+          formElement.value = this.$session.mainData.companyName;
+        }
+      }
+    }
+    if (UtilityMethods.getResponsiveModes(this.$session.responsiveLayout.responsiveMode).isTabMode) {
+      this.$data.showThumbContainer = false;
+      this.$data.isHiddenThumbContainer = true;
+    }
+    this.loadPdf();
+    this.updateInitialAssignee();
+    const onboardingData = this.$session.onboardingData;
+    if (onboardingData.showTour && onboardingData.pageName === PageName.Filling) {
+      this.$mutation.updateOnboardingData({ tourAction: TourAction.DragDrop, pageName: PageName.Prepare });
+    }
+
+    // set brand button color and button text color.
+    const { buttonColor, buttonTextColor } = this.$session.embedData;
+    UtilityMethods.setBrandButton(buttonColor, buttonTextColor);
+    this.initializeSignalR();
+  },
+
+  unmounted () {
+    this.saveDraftFormElements();
+    window.onresize = null;
+    document.onmousedown = null;
+    document.ondblclick = null;
+    this.eventListeners.forEach(({ event, handler }) => {
+      this.$eventBus.off(event, handler);
+    });
+  },
+
+  methods: {
+    documentClickListener (args: any): void {
+      this.contextMenuCloseEvent();
+      if (!this.$data.isTextOrDropdownValueChange && !(args.target as any).closest('.bs-dataSyncTag_props') && (this.pdfFormElement.isConditionalPage && !(args.target as any).closest('#formElementsContainer')) && !(args.target as any).closest('.e-toast-container') && !(args.target as any).closest('#conditionalRuleApply')) {
+        const toastObj = (this as any).$refs.customToast;
+        toastObj.hide();
+      }
+      const embedData = this.$session.embedData;
+      if (embedData.isEmbedPage && embedData.showTooltip) {
+        this.updateTooltip();
+      }
+    },
+
+    updateInitialAssignee (): void {
+      this.advanceSettingsInstance.updateAssignee(this.fieldContainerInstance.formElements, this.pdfFormElement);
+    },
+
+    initializeSignalR () {
+      const retryDelay: number[] = [1000, 3000, 3000, 3000];
+      const logger = new SignalRLogger((this as any).$nuxt.$signalRLogger.applicationInsightAnalytics);
+      const hubUrl = '/signDocumentHub';
+      this.signalRInstance = new signalR.HubConnectionBuilder()
+        .withUrl(hubUrl)
+        .withAutomaticReconnect(retryDelay)
+        .configureLogging(logger)
+        .build();
+      this.signalRInstance.start()
+        .catch((err: any) => {
+          this.signalRConnectionError(err);
+        });
+    },
+
+    signalRConnectionError (err: any) {
+      const $this = (this as any);
+      $this.$nuxt.$signalRLogger.log(signalR.LogLevel.Error, err.toString());
+    },
+
+    updateAssigneeForCustomFields (assigneeData) {
+      if (this.fieldContainerInstance.myFormFields.length > 0 || this.fieldContainerInstance.sharedFormFields.length > 0) {
+        const customFields = this.fieldContainerInstance.getCustomFields();
+        for (const customField of customFields) {
+          const formElementType = customField.formField.elementType;
+          if (formElementType !== 'label' && formElementType !== 'hyperlink') {
+            customField.formField.fill1 = assigneeData.color1;
+            customField.formField.fill2 = assigneeData.color2;
+            if (formElementType === 'name' || formElementType === 'email') {
+              customField.formField.value = formElementType === 'name' ? assigneeData.signerName : assigneeData.signerMail;
+            }
+          }
+        }
+      }
+    },
+
+    updateAdvanceSettingsVariables (args: any): void {
+      this.$data.showAdvanceFields = args;
+      document.getElementById('pdfViewer_parent').focus();
+    },
+
+    isSharableFormField (selectedCustomFieldId: string) {
+      this.isSharedFieldSelected = this.fieldContainerInstance.sharedFormFields.some((element: any) => element.formField.id === selectedCustomFieldId);
+    },
+
+    showThumb (value: boolean): void {
+      this.$data.showThumbContainer = value;
+      this.$data.isHiddenThumbContainer = !this.$data.showThumbContainer;
+      this.resizePDFViewer();
+    },
+
+    resizePDFViewer (): void {
+      setTimeout((): void => {
+        window.dispatchEvent(new Event('resize'));
+        this.pdfFormElement.scaleFormContainer(this.pdfFormElement.pdfInstance.zoomPercentage);
+      }, 0);
+    },
+
+    updateStyleOnResizePDFViewer (): string[] {
+      const classList: string[] = [];
+      if (this.$data.isConditionalPage) {
+        this.$data.isDesktopMode ? classList.push('createLogicSectionEnabled', 'animateOnResizePdf') : classList.push('createLogicSectionEnabledResponsiveMode', 'animateOnResizePdf');
+      } else if (this.$session.mainData.anchorTxtConfigSectionVisibility) {
+        this.$data.isDesktopMode ? classList.push('anchorTxtConfigSecEnabled', 'animateOnResizePdf') : classList.push('anchorTxtConfigSecResponsiveModeEnabled', 'animateOnResizePdf');
+      } else {
+        classList.push('animateOnPdfToOriginalPosition');
+      }
+
+      if (this.$session.responsiveLayout.responsiveMode === ResponsiveMode.TabMode) {
+        if (this.$session.mainData.isSelfSign) {
+          classList.push('selfSignPdfViwerPosition');
+        } else {
+          classList.push('tabLayoutPosition');
+        }
+      }
+
+      return classList;
+    },
+
+    saveFormElements (): void {
+      this.$mutation.updatePrepareFormData({ formElementsData: this.pdfFormElement.save() });
+      this.updateFieldCount();
+    },
+
+    updateFieldCount (): void {
+      this.$mutation.resetSignerFieldCount();
+      this.$mutation.resetUploadDocumentFieldCount();
+      this.$mutation.updateSignerFieldCount(this.getSignerFieldCount());
+      for (let i = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+        const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+        const documentProperties: DocumentProperties = this.thumbnailInstance.getDocumentProperties('thumbImageContainer_' + pageFormElement.pageIndex, this.$session.mainData.uploadedDocumentList);
+        if (documentProperties !== null) {
+          const checkboxCount = this.pdfFormElement.checkboxFieldCount();
+          let documentFieldCount: number = pageFormElement.formElements.filter(x => x.elementType !== 'label' && x.elementType !== 'checkbox').length;
+          documentFieldCount += checkboxCount.length > 0 ? checkboxCount.filter(x => x.pageIndex === pageFormElement.pageIndex).length : 0;
+          this.$mutation.updateUploadDocumentData({ order: documentProperties.order, fieldCount: documentProperties.fieldCount + documentFieldCount });
+        }
+      }
+    },
+
+    saveDraftFormElements (): void {
+      if (this.isDocumentLoaded) {
+        this.$mutation.updatePrepareFormData({ formElementsData: this.pdfFormElement.draftSave() });
+        this.updateFieldCount();
+      }
+    },
+
+loadPdf (): void {
+      const pdfViewer: PdfViewerComponent = this.pdfRenderInstance.pdfViewer;
+      const uploadDocumentList: DocumentProperties[] = this.$session.mainData.uploadedDocumentList;
+      const removedDocumentList: DocumentProperties[] = this.$session.mainData.removedDocumentList;
+      const embedData = this.$session.embedData;
+      const canAllowMultipleUpload = embedData.isEmbedPage && uploadDocumentList.length === 1 && uploadDocumentList[0].parentId && removedDocumentList.length === 0;
+      if (uploadDocumentList.concat(removedDocumentList).length > 1 || canAllowMultipleUpload) {
+        if (this.$session.mainData.enableMultipleUpload) {
+          if (embedData.isEmbedPage) {
+            this.$nuxt.$api.preparePage.embedMultipleUpload({
+              data: uploadDocumentList.concat(removedDocumentList),
+              query: {
+                documentId: embedData.documentId,
+                embedId: embedData.embedId,
+                organizationId: embedData.organizationId
+              }
+            }).then((data) => {
+              this.$mutation.updateMainData({ enableMultipleUpload: false });
+              this.loadPDFViewer(UtilityMethods.deleteDocumentName(uploadDocumentList));
+            }).catch((e: any) => {
+            });
+          } else {
+            this.$nuxt.$api.preparePage.multipleUpload({
+              data: uploadDocumentList.concat(removedDocumentList),
+              query: {}
+            }).then((data) => {
+              this.$mutation.updateMainData({ enableMultipleUpload: false });
+              this.loadPDFViewer(UtilityMethods.deleteDocumentName(uploadDocumentList));
+            }).catch((e: any) => {
+            });
+          }
+        } else {
+          this.loadPDFViewer(UtilityMethods.deleteDocumentName(uploadDocumentList));
+        }
+      } else if (uploadDocumentList.length > 1 || (uploadDocumentList.length === 1 && uploadDocumentList[0].parentId)) {
+        this.loadPDFViewer(UtilityMethods.deleteDocumentName(uploadDocumentList));
+      } else {
+        this.loadPDFViewer(this.$session.mainData.parentDocumentId);
+      }
+    },
+
+    loadPDFViewer (args: any): void {
+      clearInterval(this.lastInterval);
+      const pdfViewer: PdfViewerComponent = this.pdfRenderInstance.pdfViewer;
+      if (this.$session.mainData.isDocumentAddedorReplaced) {
+        this.autoDetectPdfFields();
+      }
+      this.lastInterval = setInterval((): any => {
+        if (this.$session.mainData.isDraftSaved) {
+          const mainData = this.$session.mainData;
+          this.pdfFormElement.signbuilderType = mainData.signbuilderType;
+          this.updateElementsPositionInReplaceDoc();
+          pdfViewer.load(args, null);
+          clearInterval(this.lastInterval);
+        } else if (this.$session.mainData.preventDraftSave) {
+          this.$mutation.updateMainData({ preventDraftSave: false });
+        }
+      }, 1000);
+    },
+
+    pdfDocumentLoad (args: any): void {
+      const mainData = this.$session.mainData;
+      const autoReminderDetail = this.$session.reviewData;
+      this.pdfFormElement.initDroppableElement(mainData.parentDocumentId, UtilityMethods.getPageCount(mainData.uploadedDocumentList), args.pageData, autoReminderDetail.enableDocumentID);
+      this.$data.isPdfDocLoaded = true;
+
+      const pdfInstance: any = this.pdfFormElement.pdfInstance;
+      UtilityMethods.updateZoomProperties(this.$data.isLatestVersion, pdfInstance);
+      if (pdfInstance.zoomPercentage !== 100) {
+        this.pdfFormElement.scaleFormContainer(pdfInstance.zoomPercentage);
+      }
+      this.customEvent = new CustomEventHandler(document.getElementById('pdfViewer_parent'), this.pdfFormElement);
+      this.customFieldsInterval = setInterval((): any => {
+        if (this.$session.prepareData.canloadCustomFieldDesign) {
+          this.fieldContainerInstance.loadFieldContainer(this.pdfFormElement, this.customEvent);
+          this.loadFormElements();
+          clearInterval(this.customFieldsInterval);
+        }
+      }, 1000);
+      // if (UtilityMethods.canEnableAIFieldDetection(this) && mainData.canShowAIFieldDetectionTour) {
+      //   this.$mutation.updateMainData({ showIntroDialog: true });
+      // } else {
+      //   this.$mutation.updateMainData({ showIntroDialog: false });
+      // }
+    },
+
+    loadFormElements (): void {
+      const sessionStorageDatas: any = this.$session;
+      if (this.$data.isPdfDocLoaded && this.$data.isFieldsUpdated) {
+        if (sessionStorageDatas.prepareData.formElementsData) {
+          const formElementsData = JSON.parse(sessionStorageDatas.prepareData.formElementsData);
+          for (const pageFormElement of formElementsData.pageFormElementsList) {
+            for (const formElement of pageFormElement.formElements) {
+              formElement.customFieldId = '';
+              if (formElement.elementType === 'radiobutton') {
+                let count = 1;
+                for (const children of formElement.children) {
+                  children.label = children.label ? children.label : 'RadioChild' + count;
+                  count++;
+                }
+              } else if (formElement.elementType === 'title') {
+                formElement.value = sessionStorageDatas.mainData.isSelfSign ? formElement.value || sessionStorageDatas.mainData.jobTitle : formElement.value;
+              } else if (formElement.elementType === 'company') {
+                formElement.value = sessionStorageDatas.mainData.isSelfSign ? sessionStorageDatas.mainData.companyName : formElement.value;
+              }
+              formElement.isRequired = sessionStorageDatas.mainData.isSelfSign ? false : formElement.isRequired;
+            }
+          }
+          this.hasAIField(JSON.parse(JSON.stringify(formElementsData)));
+          this.pdfFormElement.load(JSON.stringify(formElementsData), sessionStorageDatas.mainData.resetStartPosition, this.$data.pageNoList, this.$data.isTemplatePage);
+          if (sessionStorageDatas.mainData.resetStartPosition || this.$data.pageNoList.length > 0) {
+            this.$mutation.updatePrepareFormData({ formElementsData: this.pdfFormElement.save() });
+            this.$mutation.updateMainData({ resetStartPosition: false });
+            this.$data.pageNoList = [];
+          }
+        }
+        this.$eventBus.emit('setfooterClass', '');
+        this.advanceSettingsInstance.enablePreviewPage();
+        this.thumbnailInstance.loadThumbnail(this.pdfFormElement, sessionStorageDatas.mainData.uploadedDocumentList, 'prepare');
+        this.fieldContainerInstance.showTooltip();
+        this.isDocumentLoaded = true;
+      }
+    },
+
+    updateValuesForFieldsOnPageLoad (pageFormElements: PageFormElements[]): void {
+      const mainData: any = this.$session.mainData;
+      const droppedPageFormElements: PageFormElements[] = [];
+      for (const pageFormElement of pageFormElements) {
+        const droppedFields: FormElement[] = [];
+        for (const formElement of pageFormElement.formElements) {
+          const clonedFormElement: FormElement = this.pdfFormElement.cloneFormElementForSave(formElement);
+          clonedFormElement.visibility = true;
+          if (mainData.isSelfSign) {
+            ConditionalLogicMethods.revertConditionalLogic(clonedFormElement, true);
+          }
+          const signerDetails: any = this.$session.signerData.signerDetails.find(x => x.id === clonedFormElement.signerId);
+          const allowUpdate = UtilityMethods.canAllowEditing(clonedFormElement, this.pdfFormElement);
+          if (allowUpdate && signerDetails !== null) {
+            if (clonedFormElement.elementType === 'name') {
+              clonedFormElement.value = signerDetails.signType === SignType.Single ? signerDetails.signerName : '';
+            } else if (clonedFormElement.elementType === 'email') {
+              clonedFormElement.value = signerDetails.signType === SignType.Single ? signerDetails.signerMail : '';
+            } else if ((clonedFormElement.elementType === 'title' || clonedFormElement.elementType === 'company') && !this.$session.mainData.isSelfSign && clonedFormElement.value) {
+              clonedFormElement.value = '';
+            }
+          }
+          if (formElement.elementType === 'datepicker' && mainData.isSelfSign) {
+            const dateFormat = formElement.label || this.$session.reviewData.dateFormat;
+            const timeFormat = formElement.timeFormat || this.$session.reviewData.timeFormat;
+            const dateTimeFormat: string = UtilityMethods.getDateTimeFormat(dateFormat, timeFormat);
+            clonedFormElement.value = this.globalize.formatDate(new Date(), { format: dateTimeFormat });
+          }
+          droppedFields.push(clonedFormElement);
+        }
+        if (droppedFields.length > 0) {
+          droppedPageFormElements.push({ formElements: droppedFields, pageIndex: pageFormElement.pageIndex });
+        }
+      }
+
+      this.$mutation.updatePrepareFormData({ formElementsData: JSON.stringify({ pageFormElementsList: droppedPageFormElements }) });
+    },
+
+    updateTooltip (): void {
+      this.$mutation.updateEmbedData({ showTooltip: false });
+      if (this.$data.isDesktopMode) {
+        this.fieldContainerInstance.closeTooltip();
+      } else {
+        this.$data.tooltipDlgVisibility = false;
+      }
+    },
+
+    closeTooltip (): void {
+      const tooltipObj: any = this.$refs.customTooltip;
+      tooltipObj.ej2Instances.close();
+      tooltipObj.ej2Instances.opensOn = 'Auto';
+      tooltipObj.ej2Instances.dataBind();
+    },
+
+    getVisibilityOfTooltipDialog (): void {
+      const $this = this as any;
+      const element = document.getElementById('tooltipDlg');
+      const parentElement = element.parentElement;
+      parentElement.classList.add('tooltipDlg-parent-container');
+      this.$data.tooltipDlgVisibility = true;
+    },
+
+    pdfPageChange (args: PageChangeEventArgs): void {
+      if (!this.pdfFormElement.isConditionalPage) {
+        this.pdfFormElement.selectedPageIndex = args.currentPageNumber;
+        this.thumbnailInstance.onPageChangeEvent(args, this.$session.mainData.uploadedDocumentList);
+      }
+    },
+
+    /* Pdfviewer Control Client Side Events Handling - End */
+
+    /* Finish option validation - Start */
+
+    getSignerFieldCount (): any {
+      const signerList: any[] = [];
+      const checkboxElements = this.pdfFormElement.checkboxFieldCount();
+      for (const pageFormElement of this.pdfFormElement.pageFormElementsList) {
+        for (const formElement of pageFormElement.formElements) {
+          if (formElement.elementType !== 'checkbox') {
+            this.updateSignerList(signerList, formElement.signerId);
+          }
+        }
+      }
+      for (const checkbox of checkboxElements) {
+        this.updateSignerList(signerList, checkbox.signerId);
+      }
+      return signerList;
+    },
+
+    updateSignerList (signerList: any[], id: string) {
+      const index: number = this.isSignerExist(signerList, id);
+      if (index === -1) {
+        signerList.push({ signerId: id, fieldCount: 1 });
+      } else {
+        const signerItem: any = signerList[index];
+        signerItem.fieldCount += 1;
+      }
+    },
+
+    isSignerExist (signerList: any[], signerId: string) {
+      let index: number = 0;
+      for (const signer of signerList) {
+        if (signer.signerId === signerId) {
+          return index;
+        }
+        index++;
+      }
+      return -1;
+    },
+
+    /* Finish option validation - End */
+
+    /* Default recipient settings implementation handling - start */
+
+    recipientChange (args: any): void {
+      this.$nuxt.$userInsight.track(MixPanelAction.ChangeRecipientOptionClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.ChangeRecipientOptionAction, Origin: UserInsightOrigin.PrepareDocument }));
+      this.fieldContainerInstance.recipientChange(args);
+    },
+
+    onRecipientFocus (): void {
+      if (this.pdfFormElement.selectedFormElement && !this.pdfFormElement.isConditionalPage) {
+        if (this.pdfFormElement.selectedFormElement.elementType === 'dropdown' && this.$data.showDropdown) {
+          this.dropdownFieldFocusOut();
+        }
+        this.pdfFormElement.selectedFormElement = null;
+        this.pdfFormElement.selectedChildFormElement = [];
+        this.pdfFormElement.formRendering.svgContext.clearConditionalSelector();
+        this.pdfFormElement.formRendering.svgContext.clearSelector();
+        this.$data.showAdvanceFields = false;
+        this.advanceSettingsInstance.isMultiSelect = false;
+        this.hideAdvanceSettings();
+      }
+    },
+
+    confirmDeleteImageDialog (isdeleteConfirm: boolean) {
+      const uncheckedFileExtension = this.$nuxt.$session.advanceSettings.uncheckedFileExtension;
+      if (isdeleteConfirm) {
+        if (uncheckedFileExtension) {
+          this.advanceSettingsInstance.updateImageFormElement(uncheckedFileExtension, false);
+        }
+        this.updateImageValue({ imageValue: '', data: '', isImageCropped: false }, this.pdfFormElement.selectedFormElement);
+      } else {
+        let selectedElement: FormElement = this.pdfFormElement.selectedFormElement;
+        if (this.advanceSettingsInstance.isMultiSelect) {
+          selectedElement = UtilityMethods.getCommonFormElement(selectedElement).formElement;
+        }
+        this.advanceSettingsInstance.updateAdvanceSettingForImage(selectedElement);
+      }
+      this.$mutation.updateAdvanceSettings({ deleteImageValueDialogVisible: false });
+    },
+
+    getImageSource (elementType: string): { [key: string]: Object } {
+      if (elementType === 'signature') {
+        return this.lastSavedSignature;
+      } else if (elementType === 'initial') {
+        return this.lastSavedInitial;
+      }
+      return null;
+    },
+
+    /* Default recipient settings implementation handling - end */
+
+    /* Property Changes Handling Start */
+
+    closeAdvance (): void {
+      this.$data.showAdvanceFields = false;
+      this.$data.showThumbContainer = true;
+      this.hideAdvanceSettings();
+    },
+
+    hideAdvanceSettings (): void {
+      this.$mutation.updateResponsiveLayout({ showAdvanceSettings: false });
+      if (this.$data.isHiddenThumbContainer) {
+        this.$data.showThumbContainer = false;
+        this.resizePDFViewer();
+      }
+      if (!this.$data.isDesktopMpde && !this.$data.isHiddenThumbContainer) {
+        this.resizePDFViewer();
+      }
+    },
+
+    showAdvanceSettings (elementType: any): void {
+      const isSelfSign: boolean = this.$session.mainData.isSelfSign;
+      let showAdvance: boolean = true;
+      if ((elementType === 'signature' || elementType === 'initial') && isSelfSign) {
+        showAdvance = false;
+      }
+
+      if (showAdvance && !this.$data.showAdvanceFields) {
+        this.$data.showThumbContainer = true;
+        this.resizePDFViewer();
+      }
+    },
+getPDFRenderComponentStyle (): any {
+      let width = '0px';
+      let height = '0px';
+      const top = '0px';
+      if (!this.$data.isDesktopMode && (this.$data.isConditionalPage || this.$session.mainData.anchorTxtConfigSectionVisibility)) {
+        setTimeout(() => {
+          const pdfContainerParentElement = document.getElementById('pdfViewer_parent');
+          if (this.$data.isConditionalPage) {
+            const conditionalElementHeight = document.getElementById('conditionalDropDown').getBoundingClientRect().height;
+            pdfContainerParentElement.style.height = 'calc(100% - ' + conditionalElementHeight + 'px)';
+            pdfContainerParentElement.style.top = conditionalElementHeight + 'px';
+          } else {
+            const autoPositionElementHeight = document.getElementById('anchorTxtConfigSection').getBoundingClientRect().height;
+            pdfContainerParentElement.style.height = 'calc(100% - ' + autoPositionElementHeight + 'px)';
+            pdfContainerParentElement.style.top = autoPositionElementHeight + 'px';
+          }
+          this.resizePDFViewer();
+        }, 0);
+        return { height: '100%', width: this.$data.isMobileMode ? '100%' : this.$data.isConditionalPage ? 'calc(100% - 250px)' : '100%', float: 'left' };
+      } else if (this.$data.isDesktopMode) {
+        if (this.$session.customFieldData.hasCustomFieldEditModeEnabled || this.$session.mainData.anchorTxtConfigSectionVisibility) {
+          width = '100%';
+        } else {
+          width = this.$data.showAdvanceFields && this.$data.showThumbContainer ? 'calc(100% - 250px)' : this.$data.showThumbContainer ? 'calc(100% - 250px)' : '100%';
+        }
+        height = '100%';
+        return { width, height, top, float: 'left' };
+      } else if (this.$data.isMobileMode) {
+        width = '100%';
+        height = '100%';
+        return { width, height, top, float: 'left' };
+      } else {
+        height = '100%';
+        width = this.$data.showAdvanceFields && this.$data.showThumbContainer ? 'calc(100% - 250px)' : this.$data.showThumbContainer && !this.$data.isHiddenThumbContainer ? 'calc(100% - 220px)' : 'calc(100% - 50px)';
+        setTimeout(() => {
+          const pdfContainerParentElement = document.getElementById('pdfViewer_parent');
+          const assigneeContainerHeight = document.getElementById('parentAssigneeContainer').getBoundingClientRect().height;
+          pdfContainerParentElement.style.height = 'calc(100% - ' + assigneeContainerHeight + 'px)';
+          pdfContainerParentElement.style.top = assigneeContainerHeight + 'px';
+          this.resizePDFViewer();
+        }, 0);
+        return { width, height, top, float: 'left' };
+      }
+    },
+
+    getPDFViewerClass (): string {
+      if (this.$data.isDesktopMode) {
+        return this.$data.isConditionalPage || this.$session.mainData.anchorTxtConfigSectionVisibility ? 'bs-desktop-pdfViewer-conditional-page' : 'bs-desktop-pdfViewer';
+      } else {
+        return this.$data.isConditionalPage || this.$session.mainData.anchorTxtConfigSectionVisibility ? 'bs-mobile-pdfViewer-conditional-page' : this.$session.mainData.isSelfSign ? 'bs-mobile-pdfViewer-self-sign' : 'bs-mobile-pdfViewer';
+      }
+    },
+
+    canDisplayAssigneeContainer () {
+      if (this.$data.isConditionalPage || this.$session.mainData.anchorTxtConfigSectionVisibility) {
+        return false;
+      }
+
+      return !this.$session.mainData.isSelfSign && !this.$data.isDesktopMode;
+    },
+
+    getPDFViewerStyle (): any {
+      const $this = this as any;
+      if (!this.$data.isConditionalPage && !this.$session.mainData.anchorTxtConfigSectionVisibility) {
+        if (this.$data.isDesktopMode) {
+          return { height: '100%' };
+        } else if (this.$session.mainData.isSelfSign || !this.$data.isMobileMode) {
+          return { height: 'calc(100% - 98px)' };
+        } else {
+          return { height: 'calc(100% - 130px)' };
+        }
+      }
+    },
+
+    getAutoDetectStyle (): any {
+      if (!this.$data.isDesktopMode) {
+        setTimeout(() => {
+          const assigneeContainerHeight = document.getElementById('parentAssigneeContainer').getBoundingClientRect().height;
+          const autoDetectContainer = document.getElementById('autoDetectFieldDialog');
+          const pdfViewerWidth = document.getElementById('pdfViewer_parent');
+          autoDetectContainer.style.top = assigneeContainerHeight + 'px';
+          autoDetectContainer.style.width = pdfViewerWidth.clientWidth + 'px';
+        }, 0);
+      }
+    },
+
+    getAssigneeContainerWidth (): string {
+      if (this.$data.isDesktopMode) {
+        return '192px';
+      } else if (this.$data.isMobileMode) {
+        return '100%';
+      } else {
+        return this.$data.showAdvanceFields && this.$data.showThumbContainer ? 'calc(100% - 250px)' : this.$data.showThumbContainer ? 'calc(100% - 220px)' : '100%';
+      }
+    },
+
+    getVisibilityOfFormContainer (): string {
+      if (!this.$data.isMobileMode) {
+        if (this.$data.isConditionalPage || this.$session.mainData.anchorTxtConfigSectionVisibility) {
+          return 'none';
+        }
+        return 'block';
+      } else {
+        if (!this.$session.responsiveLayout.showAdvanceSettings && !this.$data.isConditionalPage && !this.$session.mainData.anchorTxtConfigSectionVisibility) {
+          return 'block';
+        }
+        return 'none';
+      }
+    },
+
+    contextMenuCloseEvent (): void {
+      if (this.pdfFormElement && !this.pdfFormElement.selectedFormElement && !this.pdfFormElement.copyField) {
+        this.$data.showMobileContextMenu = false;
+        const pdfContextMenu = (this as any).$refs.pdfFormContextMenu;
+        if (pdfContextMenu) {
+          const menuList = pdfContextMenu.ej2Instances as any;
+          if (menuList && !menuList.isMenusClosed) {
+            menuList.close();
+          }
+        }
+      }
+    },
+removeFieldsBtnTextClick () {
+      this.$data.removeAiFieldConfirmationDlg = false;
+      const pageFormElementsList: PageFormElements[] = this.pdfFormElement.pageFormElementsList;
+      for (const pageFormElements of pageFormElementsList) {
+        this.updateProcessingButton(null, null, pageFormElements.pageIndex);
+        const aiDetectedFormFields = pageFormElements.formElements.filter(x => x.isAIField);
+        if (aiDetectedFormFields) {
+          this.$mutation.updateMainData({ aiFieldDetectStatus: AiFieldDetectStatus.Processing });
+          for (let i = 0; i < aiDetectedFormFields.length; i++) {
+            this.pdfFormElement.removeAiFields(aiDetectedFormFields[i]);
+          }
+        }
+      }
+      const context = (this as any);
+      const toastObj = context.$refs.customToast;
+      toastObj.hide();
+      toastObj.show(context.$t('preparePage.aiFieldRemoveSuccess'), 'bs_toast_success', 'bs_success_icon', null, 5000, true);
+      this.$mutation.updateMainData({ aiFieldDetectStatus: AiFieldDetectStatus.Idle });
+    },
+
+    hasAIField (formElementsData): void {
+      if (!formElementsData.pageFormElementsList || formElementsData.pageFormElementsList.length === 0) {
+        this.$mutation.updateMainData({ aiFieldDetectStatus: AiFieldDetectStatus.Idle });
+        return;
+      }
+
+      for (const pageFormElement of formElementsData.pageFormElementsList) {
+        for (const formElement of pageFormElement.formElements) {
+          if (formElement.isAIField) {
+            this.$mutation.updateMainData({ aiFieldDetectStatus: AiFieldDetectStatus.Completed });
+            return;
+          }
+        }
+      }
+    },
+
+    saveCustomFieldBtnClick (saveAsCustomNewField) {
+      this.fieldContainerInstance.saveCustomFieldBtnClick();
+      if (saveAsCustomNewField) {
+        this.fieldContainerInstance.saveAsCustomNewField = true;
+      }
+    },
+
+    getThumbContainerDisplay (): string {
+      const sessionStorage = this.$session;
+      if ((this.$data.showAdvanceFields && this.$data.showThumbContainer) || sessionStorage.mainData.anchorTxtConfigSectionVisibility || sessionStorage.customFieldData.hasCustomFieldEditModeEnabled || (this.$data.isMobileMode && this.$data.hasPdfFormFields)) {
+        return 'none';
+      }
+
+      return 'block';
+    }
+from prepare vue
+<template>
+  <div style="height: 100%">
+    <div class="bs-thumb-container-body" :style="{ display: 'block', overflow: 'hidden', height: '100%' }">
+      <div class="show-thumb-content" :style="{ right : !disableThumbContainer && !showThumbContainer ? '0px' : isMobileMode ? '200px' : '220px', display: isResponsiveLayout() ? 'block': 'none'}">
+        <div :style="{ display : !showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="showThumbTooltip" :content="showThumbnailsTooltipContent">
+            <ejs-button :iconCss="expandPanelIcon" style="width:32px;" @click="showOrHideThumbContainer" />
+          </ejs-tooltip>
+        </div>
+        <div :style="{ display : showThumbContainer ? 'block' : 'none' }">
+          <ejs-tooltip ref="hideThumbTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+            <span :class="collapsePanelIcon + ' header-icon'" @click="showOrHideThumbContainer" ></span>
+          </ejs-tooltip>
+        </div>
+        <div class="show-page-navigation">
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnail') }}</span>
+        </div>
+      </div>
+      <div id="thumbnailContainer" :class="'bs-thumb-container' + thumbState" :style="{ display : !disableThumbContainer && showThumbContainer ? 'block' : 'none', height: getThumbHeight() }">
+        <div class="bs-thumbnail-images-container">
+          <div class="bs-thumbnail-header">
+            <div class="bs-thumbnail-tooltip-container">
+              <ejs-tooltip ref="thumbnailTooltip" :content="hideThumbnailsTooltipContent" target=".sf-icon-PanelCollapse">
+                <span
+                  id="thumbnailsHeader"
+                  :tabindex="0"
+                  role="button"
+                  :class="collapsePanelIcon + ' header-icon'"
+                  :aria-label="hideThumbnailsTooltipContent"
+                  @click="showOrHideThumbContainer"
+                  @keydown.enter="showOrHideThumbContainer"
+                ></span>
+              </ejs-tooltip>
+              <span class="header-text" style="margin-left: 8px; padding-top: 2px;">{{ $t('thumbnailComponent.thumbnail') }}</span>
+            </div>
+            <ejs-tooltip
+              ref="thumbnailHeadingToolTip"
+              :content="thumbnailDocHeading"
+              cssClass="tooltip-max-width"
+              target=".pdf-file-indicator"
+              width="auto"
+              style="display: inline-flex; overflow: hidden;"
+            >
+              <div id="thumbnailFileName">
+                <span id="thumbnailPdfFileIndicator" class="pdf-file-indicator" style="display: inline-block; float: left; width:auto;">{{ thumbnailDocHeading }}</span>
+                <span style="display: inline-block;font-size: 12px;float: left;margin: 10px 0px 0px 4px; color: #666e80;min-width: 72px;">{{ thumbnailDocPageCount }}</span>
+              </div>
+            </ejs-tooltip>
+          </div>
+          <div id="thumbnailBody" class="bs-thumbnail-body" @scroll="thumbScrollChange">
+            <div v-for="(thumbnail, index) in thumbData" :key="thumbnail.pageId">
+              <div v-if="thumbnail.isFirstPage && currentPdfFile !== thumbnail.documentName" id="thumbnailBodyPdfFileIndicator" class="pdf-file-indicator">
+                <ejs-tooltip :content="thumbnail.documentName" width="auto" maxWidth="120px" style="display: inline-flex; overflow: hidden;" cssClass="tooltip-max-width">
+                  <span class="document-name-tooltip" style="display: inline-block;width: auto;float: left;text-overflow: ellipsis;overflow: hidden;white-space: nowrap; font-weight: 500;">{{ thumbnail.documentName }}</span>
+                </ejs-tooltip>
+                <span style="display: inline-block;font-size: 12px;float: left;color: rgb(102, 110, 128);max-width: 72px;margin-left: 4px;font-weight: 400;">
+                  {{ thumbnail.pageCount > 1 ? $t('thumbnailComponent.thumbnailPageCount', { pageCount: thumbnail.pageCount }) : $t('thumbnailComponent.thumbnailSinglePage', { pageCount: thumbnail.pageCount }) }}
+                </span>
+              </div>
+              <div v-show="thumbnail.source" :id="'thumbnail_' + (thumbnail.uniqueId)" align="center" style="padding-top:14px">
+                <div class="bs-thumb-content-container">
+                  <div :id="'thumbImageContainer_' + (index + 1)" class="bs-thumb-image-container" :tabindex="100 + index" style="outline: none;" @click="navigatePageFromThumbnail(index+1)">
+                    <img :src="thumbnail.source" style="width:100%; height: 155px; border-radius: 4px; pointer-events: none" :alt="thumbnailAlt" @load="imgLoad"/>
+                  </div>
+                  <div class="bs-thumb-border-container">
+                    <span class="field-count-span" ></span>
+                  </div>
+                  <div class="bs-thumb-complete-container">
+                    <span class="sf-icon-Tick" ></span>
+                  </div>
+                </div>
+                <!-- <div style="margin-top: 8px; height: 18px; width: 100%; display: table">
+                  <span style="display:table-cell; vertical-align:middle; text-align: center">{{ index + 1 }}</span>
+                </div> -->
+                <div style="margin-top: 8px; height: 18px; width: 100%; display: flex; justify-content: center; align-items: center; gap: 8px;">
+               <span>{{ index + 1 }}</span>
+               <span class="sf-icon-Delete" style="cursor: pointer; font-size: 14px; color: red;"
+               @click="deletePage(thumbnail.documentId, index + 1)"></span>
+              </div>
+              </div>
+              <div v-show="!thumbnail.source" :id="'thumbnailPage_' + (thumbnail.uniqueId)" style="width: 100%; height:calc(100% - 120px);">
+                <ThumbnailSkeleton />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bs-thumbnail-overlay" style="width: 100%; height:calc(100% - 120px);">
+          <ThumbnailTemplate />
+        </div>
+      </div>
+      <div class="show-thumb-content" :style="{ display : !disableThumbContainer && !showThumbContainer && !isResponsiveLayout() ? 'block' : 'none' }">
+        <ejs-tooltip ref="showOrHideThumbToolTip" :content="showThumbnailsTooltipContent">
+          <ejs-button
+            id="expandThumbnail"
+            tabindex="0"
+            :aria-label="$t('thumbnailComponent.showThumbnail')"
+            :iconCss="expandPanelIcon"
+            style="width:32px;"
+            @click="showOrHideThumbContainer"
+          />
+        </ejs-tooltip>
+        <div class="show-page-navigation">
+          <ejs-button id="pagePreviousButton" :iconCss="pagePreviousIcon" style="width:32px;" :class="[disablePreviousPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']" @click="clickPreviousPage" />
+          <span class="page-navigate">{{ $t('thumbnailComponent.thumbnailPage', { currentPage: currentPage, totalPage: totalPage }) }}</span>
+          <ejs-button
+            id="pageNextButton"
+            :iconCss="pageNextIcon"
+            class="sf-down-arrow"
+            style="width:32px;"
+            :class="[disableNextPage ? 'disable e-control e-btn e-lib e-icon-btn' : 'e-control e-btn e-lib e-icon-btn']"
+            @click="clickNextPage"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script lang="ts">
+import { defineComponent } from 'vue';
+import { TooltipComponent } from '@syncfusion/ej2-vue-popups';
+import { ButtonComponent } from '@syncfusion/ej2-vue-buttons';
+import { UtilityMethods } from '../types/util';
+import { FormElement, PageFormElements, DocumentProperties, ResponsiveMode, CheckboxCondition, BoundingRect, ResizeOptions } from '../types/interface';
+import { PdfFormElements } from '../types/pdfFormElements';
+import { UserInsight, UserInsightAction, UserInsightOrigin, UserInsightPage, MixPanelAction } from '../models/UserInsight';
+import { Accessibility } from '../types/accessibility';
+import ThumbnailSkeleton from './thumbnail-skeleton.vue';
+import ThumbnailTemplate from './thumbnail-template.vue';
+
+export default defineComponent({
+  name: 'ThumbnailComponent',
+  components: {
+    ThumbnailTemplate,
+    ThumbnailSkeleton,
+    'ejs-tooltip': TooltipComponent,
+    'ejs-button': ButtonComponent
+  },
+
+  emits: ['showSkeleton', 'showThumb'],
+
+  data () {
+    let updateAccessibleElements: Function;
+    const isThumbnailRendered: boolean = false;
+    const pdfFormElement: PdfFormElements = null;
+    const documentProperties: DocumentProperties[] = [];
+    const isScreenReaderClicked: boolean = false;
+    return {
+      updateAccessibleElements,
+      isThumbnailRendered,
+      pdfFormElement,
+      documentProperties,
+      isScreenReaderClicked,
+      expandPanelIcon: 'sf-icon-Sidepaneleft1',
+      collapsePanelIcon: 'sf-icon-PanelCollapse',
+      pageNextIcon: 'sf-icon-Control',
+      pagePreviousIcon: 'sf-icon-Control',
+      hideThumbnailsTooltipContent: this.$t('thumbnailComponent.hideThumbnailsTooltipContent'),
+      showThumbnailsTooltipContent: this.$t('thumbnailComponent.showThumbnailsTooltipContent'),
+      thumbnailAlt: this.$t('accessibility.thumbnailAlt'),
+      thumbState: '',
+      showThumbContainer: this.isShowThumbContainer(),
+      disableThumbContainer: false,
+      thumbData: [],
+      thumbnailDocHeading: '',
+      thumbnailDocPageCount: '',
+      currentPdfFile: '',
+      disableNextPage: false,
+      disablePreviousPage: false,
+      currentPage: 0,
+      totalPage: 0,
+      showAdvanceFields: false,
+      isSignerMode: false,
+      fieldRelationId: '',
+      isMobileMode: UtilityMethods.getResponsiveModes(this.$session.responsiveLayout.responsiveMode).isMobileMode,
+      observer: null
+    };
+  },
+
+  /* Data lables Implementation Ends */
+
+  mounted (): void {
+    window.addEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+
+  beforeUnmount () {
+    window.removeEventListener('touchstart', this.handleThumbNailTouchStart);
+  },
+  methods: {
+    addObserver (): void {
+      const observableElements = document.querySelectorAll('.bs-thumbnail-body')[0];
+      observableElements.childNodes.forEach((el) => {
+        if (el.nodeType === 1) {
+          this.$data.observer = new IntersectionObserver(
+            this.onThumbnailRenderObserver,
+            {
+              threshold: 0
+            }
+          );
+          this.$data.observer.observe(el);
+        }
+      });
+    },
+
+    onThumbnailRenderObserver (entries: IntersectionObserverEntry[]): void {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const uniqueId = entry.target.children[1].id.split('_')[1];
+          if (!uniqueId) {
+            this.$sentry.captureException(new Error('Thumbnail uniqueId does not exist'));
+          } else {
+            const context = (this as any);
+            this.renderThumbnailWithRetry(context, uniqueId);
+          }
+        }
+      });
+    },
+    async deletePage(documentId, selectedPageNo) {
+      try {
+        const payload = {
+          documentId,
+          selectedPageNo
+        };
+        const response = await this.$nuxt.$api.thumbnail.deletePage({ data: payload });
+        console.log(response);
+        if (response.success) {
+          console.log("page deleted successfully");
+          // Remove the thumbnail from the local state
+          console.log(this.$data.thumbData);
+          const context = (this as any);
+          this.$data.thumbData = this.$data.thumbData.filter(thumbnail => {
+            const pageNumber = parseInt(thumbnail.pageId.split('_')[1], 10); // Extracts the page number
+            return pageNumber !== selectedPageNo; // Compare the page number
+          });
+          console.log(this.$data.thumbData);
+
+          for (let i = 0; i < this.$data.thumbData.length; i++) {
+            this.$data.thumbData[i].currentDocumentPageNumber = this.$data.thumbData[i].currentDocumentPageNumber - 1;
+          }
+
+          console.log(this.$data.thumbData);
+
+          const mainData: any = this.$session.mainData;
+          console.log(mainData);
+          this.$data.totalPage = UtilityMethods.getPageCount(this.documentProperties);
+          console.log("pagecount:", this.$data.totalPage)
+          const uploadDocumentList = this.$session.mainData.uploadedDocumentList;
+          console.log(uploadDocumentList);
+        } else {
+          console.log("page not deleted");
+        }
+      } catch (error) {
+        this.$sentry.captureException(error);
+      }
+},
+
+    renderThumbnailWithRetry (context: any, uniqueId:string, retryCount : number = 2): any {
+      const pageIndex = context.$data.thumbData.findIndex(page => page.uniqueId === uniqueId);
+      if (pageIndex === -1) {
+        this.$sentry.captureException(new Error('Thumbnail pageIndex does not exist'));
+      } else {
+        const pageToUpdate = context.$data.thumbData[pageIndex];
+        if (!pageToUpdate.source) {
+          const embedData: any = this.$session.embedData;
+          const mainData: any = this.$session.mainData;
+          let signerId = mainData.currentUserId ? mainData.currentUserId : mainData.currentSignerId;
+          if (embedData.isEmbedPage) {
+            signerId = embedData.embedId;
+          }
+          const thumbnailContentDetails = {
+            documentId: pageToUpdate.documentId,
+            parentDocumentId: pageToUpdate.parentDocumentId,
+            currentPageNumber: pageToUpdate.currentDocumentPageNumber.toString(),
+            uniqueId: pageToUpdate.uniqueId,
+            signerId,
+            secretId: mainData.secretId
+          };
+          this.$nuxt.$api.thumbnail.renderThumbnail({
+            data: thumbnailContentDetails
+          }).then((response) => {
+            const updateIndex = context.$data.thumbData.findIndex(page => page.uniqueId === response.uniqueId);
+            if (updateIndex !== -1) {
+              const reader = new FileReader();
+              reader.onloadend = function () {
+                context.$data.thumbData[updateIndex].source = reader.result;
+              };
+              reader.readAsDataURL(response.data);
+            }
+          }).catch((error) => {
+            if (retryCount > 0) {
+              this.renderThumbnailWithRetry(context, uniqueId, retryCount - 1);
+            } else {
+              this.$sentry.captureException(error);
+            }
+          });
+        }
+      }
+    },
+
+    imgLoad (): void {
+      if (this.$data.thumbState) {
+        this.$data.thumbState = '';
+      }
+    },
+
+    loadThumbnail (pdfFormElement: PdfFormElements, documentProperties: DocumentProperties[], pageName: string, isSignerMode: boolean = false): void {
+      this.pdfFormElement = pdfFormElement;
+      this.documentProperties = documentProperties;
+      this.$data.isSignerMode = isSignerMode;
+      if (pageName === 'prepare') {
+        if (this.$session.mainData.isDocumentAddedorReplaced) {
+          this.$emit('showSkeleton');
+        } else {
+          this.$mutation.updateMainData({ prepareProgress: false });
+        }
+      }
+      this.$data.thumbState = ' show-progress';
+      this.$data.thumbData = UtilityMethods.generateThumbImages(documentProperties);
+      setTimeout((): void => {
+        this.imgLoad();
+        this.addObserver();
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+        thumbImageContainer.parentElement.classList.add('active-thumb');
+        this.isThumbnailRendered = true;
+        for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+          const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+          if (pageName === 'sign') {
+            this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+          } else {
+            this.updateThumbnailFieldCount(pageFormElement.pageIndex);
+          }
+        }
+        const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+        this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+        this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+        this.$data.thumbnailDocHeading = docProperties.documentName;
+        this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+        this.$data.currentPdfFile = docProperties.documentName;
+        if (pageName === 'sign') {
+          Accessibility.setAccessibilityAttributesAfterPageLoad();
+          UtilityMethods.triggerEvent(this.updateAccessibleElements, {});
+        }
+      }, 100);
+    },
+
+    updateThumbnailFieldCount (pageIndex: number): void {
+      const context = this as any;
+      if (this.isThumbnailRendered) {
+        const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        if (!thumbImageContainer.parentElement.classList.contains('enable-field-count')) {
+          thumbImageContainer.parentElement.classList.add('enable-field-count');
+        }
+        const fieldSpan: HTMLSpanElement = thumbImageContainer.nextElementSibling.children[0] as HTMLSpanElement;
+        const pageFormElement: PageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageIndex);
+        let fieldCount: number = 0;
+        if (pageFormElement && pageFormElement.formElements && pageFormElement.formElements.length > 0) {
+          fieldCount = pageFormElement.formElements.filter((formElement: FormElement) => formElement.id !== 'multipleSelection' && formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && (formElement.elementType !== 'checkbox' || (formElement.groupName === null)) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing) && (formElement.elementType !== 'formula' || !this.pdfFormElement.enableFieldEditing)).length;
+          const checkboxElement = this.pdfFormElement.checkboxFieldCount();
+          fieldCount += checkboxElement.length > 0 ? checkboxElement.filter(x => x.pageIndex === pageIndex).length : 0;
+        }
+        if (fieldCount > 0) {
+          fieldSpan.innerText = fieldCount + (fieldCount > 1 ? ' ' + context.$t('common.fields') : ' ' + context.$t('common.field')) + ' ' + context.$t('common.added');
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    updatePageContent (documentProperties: DocumentProperties[]) {
+      debugger
+      const thumbImageContainer: HTMLElement = document.getElementById('thumbImageContainer_' + this.pdfFormElement.selectedPageIndex);
+      const docProperties: DocumentProperties = UtilityMethods.getCurrentDocumentProperties(thumbImageContainer.id, this.$data.thumbData, documentProperties);
+      this.$data.thumbnailDocPageCount = docProperties.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: docProperties.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: docProperties.pageCount });
+      for (let i: number = 0; i < this.pdfFormElement.pageFormElementsList.length; i++) {
+        const pageFormElement: PageFormElements = this.pdfFormElement.pageFormElementsList[i];
+        this.updateThumbnailFieldCountSigningPage(pageFormElement.pageIndex, pageFormElement.formElements);
+      }
+      this.$data.hideThumbnailsTooltipContent = this.$t('thumbnailComponent.hideThumbnailsTooltipContent');
+      this.$data.showThumbnailsTooltipContent = this.$t('thumbnailComponent.showThumbnailsTooltipContent');
+    },
+
+    updateFieldRelationId (fieldRelationId: any): void {
+      this.$data.fieldRelationId = fieldRelationId;
+    },
+
+    onPageChangeEvent (args: any, documentList: any): void {
+      if (this.isThumbnailRendered) {
+        UtilityMethods.scrollThumbImageToView(args.currentPageNumber, this.$data.thumbData);
+      }
+      if (!this.$data.showThumbContainer) {
+        this.$data.currentPage = args.currentPageNumber;
+        const totalPage = UtilityMethods.getPageCount(documentList);
+        if (this.$data.currentPage === 1) {
+          this.$data.disablePreviousPage = true;
+          this.$data.disableNextPage = false;
+        } else if (totalPage !== 1 && totalPage === args.currentPageNumber) {
+          this.$data.disableNextPage = true;
+          this.$data.disablePreviousPage = false;
+        } else {
+          this.$data.disableNextPage = false;
+          this.$data.disablePreviousPage = false;
+        }
+      }
+    },
+
+    updateThumbnailFieldCountSigningPage (pageIndex: number, formElements: FormElement[]): void {
+      if (this.isThumbnailRendered) {
+        const context = this as any;
+        const thumbImageContainer1: HTMLElement = document.getElementById('thumbImageContainer_' + pageIndex);
+        const status: string = this.getFiledFormElements(formElements);
+        const fieldSpan: HTMLSpanElement = thumbImageContainer1.nextElementSibling.children[0] as HTMLSpanElement;
+        const fieldCount: number = this.getTotalFieldCount(formElements);
+        if (status === 'success' && fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+
+          const filledCount: number = this.getFilledCount(formElements);
+          fieldSpan.innerText = filledCount + ' ' + context.$t('common.of') + ' ' + fieldCount + ' ' + context.$t('common.fields') + ' ' + context.$t('common.filled');
+        } else if (fieldCount > 0) {
+          if (!thumbImageContainer1.parentElement.classList.contains('enable-field-count')) {
+            thumbImageContainer1.parentElement.classList.add('enable-field-count');
+          }
+          if (thumbImageContainer1.parentElement.classList.contains('enable-complete-container')) {
+            thumbImageContainer1.parentElement.classList.remove('enable-complete-container');
+          }
+          fieldSpan.innerText = status;
+        } else {
+          fieldSpan.innerText = '';
+          thumbImageContainer1.parentElement.classList.remove('enable-field-count');
+        }
+      }
+    },
+
+    getFilledCount (formElements: FormElement[]): number {
+      let filledCount: number = 0;
+      for (let i = 0; i < formElements.length; i++) {
+        const formElement: FormElement = formElements[i];
+        if (formElement.elementType !== 'label' && formElement.elementType !== 'hyperlink' && formElement.elementType !== 'formula' && formElement.elementType !== 'formula' && this.$data.fieldRelationId === formElement.signerId && formElement.visibility) {
+          if (formElement.isRequired && formElement.allowEditing) {
+            if (formElement.elementType === 'checkbox') {
+              if (formElement.value === 'on') {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'radiobutton') {
+              const filledChild = formElement.children.find((child: FormElement) => child.value === 'on');
+              if (filledChild) {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'attachment') {
+              if (formElement.attachmentDetails && formElement.attachmentDetails.length > 0) {
+                filledCount += 1;
+              }
+            } else if (formElement.elementType === 'textbox' && formElement.value) {
+              if (UtilityMethods.TextboxValidationType(formElement, formElement.value)) {
+                filledCount += 1;
+              }
+            } else if (formElement.value) {
+              filledCount += 1;
+            }
+          } else if (formElement.elementType === 'checkbox' && formElement.groupName) {
+            const checkboxGroupCount = this.pdfFormElement.getGroupCheckboxCount(formElement.groupName);
+            if (checkboxGroupCount === 1) {
+              filledCount += 1;
+            }
+          } else {
+            filledCount += 1;
+          }
+        }
+      }
+      filledCount += this.getGroupCheckboxFilledCount(formElements);
+      return filledCount;
+    },
+    getGroupCheckboxFilledCount (formElements: FormElement[]) :number {
+      let filledCount = 0;
+      const totalCheckboxElements: FormElement[] = formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility);
+      if (totalCheckboxElements.length > 0) {
+        const groupedElements: Record<string, FormElement[]> = UtilityMethods.getCheckboxesGroupedByName(totalCheckboxElements);
+        const totalCheckboxElementsInAllPage: FormElement[] = this.pdfFormElement.pageFormElementsList.flatMap(pageFormElement => pageFormElement.formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility));
+        for (const groupName in groupedElements) {
+          const group = totalCheckboxElementsInAllPage.filter(x => x.groupName === groupName && x.visibility);
+          if (group.length > 1) {
+            const firstCheckboxElement = group[0];
+            if (formElements.includes(firstCheckboxElement)) {
+              const checkedCount = group.filter(x => x.value === 'on').length;
+              if (firstCheckboxElement.isReadOnly) {
+                filledCount += 1;
+                continue;
+              }
+              switch (firstCheckboxElement.checkboxConditionInfo.conditionType) {
+                case CheckboxCondition.Minimum:
+                  if (checkedCount >= firstCheckboxElement.checkboxConditionInfo.minimum) {
+                    filledCount += 1;
+                  }
+                  break;
+                case CheckboxCondition.Maximum:
+                  if (checkedCount <= firstCheckboxElement.checkboxConditionInfo.maximum) {
+                    filledCount += 1;
+                  }
+                  break;
+                case CheckboxCondition.Absolute:
+                  if (checkedCount === firstCheckboxElement.checkboxConditionInfo.absolute) {
+                    filledCount += 1;
+                  }
+                  break;
+                case CheckboxCondition.Range:
+                  if (checkedCount >= firstCheckboxElement.checkboxConditionInfo.minimum && checkedCount <= firstCheckboxElement.checkboxConditionInfo.maximum) {
+                    filledCount += 1;
+                  }
+                  break;
+              }
+            } else {
+              const { pageIndex } = this.pdfFormElement.pageFormElementsList.find(x => x.formElements.some(y => y.id === firstCheckboxElement.id));
+              const pageFormElements = this.pdfFormElement.getPageFormElementsByIndex(pageIndex);
+              this.updateThumbnailFieldCountSigningPage(pageIndex, pageFormElements.formElements);
+            }
+          }
+        }
+      }
+      return filledCount;
+    },
+
+    getTotalFieldCount (formElements: FormElement[]): number {
+      let fieldCount: number = formElements.filter(x => x.elementType !== 'label' && x.elementType !== 'hyperlink' && x.elementType !== 'checkbox' && x.elementType !== 'formula' && this.$data.fieldRelationId === x.signerId && x.visibility).length;
+      const totalCheckboxElements: FormElement[] = formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility);
+      if (totalCheckboxElements.length > 0) {
+        const groupedElements: Record<string, FormElement[]> = UtilityMethods.getCheckboxesGroupedByName(totalCheckboxElements);
+        const totalCheckboxElementsInAllPage: FormElement[] = this.pdfFormElement.pageFormElementsList.flatMap(pageFormElement => pageFormElement.formElements.filter(x => x.elementType === 'checkbox' && this.$data.fieldRelationId === x.signerId && x.visibility));
+        for (const groupName in groupedElements) {
+          const group = totalCheckboxElementsInAllPage.filter(x => x.groupName === groupName);
+          if (formElements.includes(group[0])) {
+            fieldCount += 1;
+          }
+        }
+        fieldCount += totalCheckboxElements.filter(x => x.groupName === null).length;
+      }
+      return fieldCount;
+    },
+
+    getFiledFormElements (formElements: FormElement[]): string {
+      const context = this as any;
+      const filledCount: number = this.getFilledCount(formElements);
+      const fieldCount: number = this.getTotalFieldCount(formElements);
+      if (this.$data.isSignerMode) {
+        if (filledCount === fieldCount) {
+          return 'success';
+        } else {
+          return filledCount + ' ' + context.$t('common.of') + ' ' + fieldCount + ' ' + context.$t('common.fields') + ' ' + context.$t('common.filled');
+        }
+      } else {
+        return fieldCount + (fieldCount > 1 ? ' ' + context.$t('common.fields') : ' ' + context.$t('common.field')) + ' ' + context.$t('common.added');
+      }
+    },
+
+    getDocumentProperties (pageId: string, documentProperties: any): DocumentProperties {
+      return UtilityMethods.getCurrentDocumentProperties(pageId, this.$data.thumbData, documentProperties);
+    },
+
+    getThumbDataLength (): number {
+      return this.$data.thumbData.length;
+    },
+
+    screenReaderAccessibility (value: boolean) : void {
+      this.$data.disableThumbContainer = value;
+      this.isScreenReaderClicked = true;
+      UtilityMethods.triggerEvent(this.updateAccessibleElements, {});
+      if (this.$data.showThumbContainer) {
+        this.showOrHideThumbContainer();
+      } else {
+        Accessibility.filterThumbnailElementIds(this.$data.showThumbContainer);
+      }
+    },
+
+    showOrHideThumbContainer (): void {
+      if (this.$data.showThumbContainer) {
+        this.$nuxt.$userInsight.track(MixPanelAction.ShowThumbnailClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.ShowThumbnailClickAction, Origin: UserInsightOrigin.PrepareDocument }));
+        this.$data.disableNextPage = this.$data.disablePreviousPage = false;
+        this.$data.totalPage = UtilityMethods.getPageCount(this.documentProperties);
+        this.$data.currentPage = this.pdfFormElement.selectedPageIndex;
+        if (this.$data.currentPage === 1) {
+          this.$data.disablePreviousPage = true;
+        }
+        if (this.$data.currentPage === this.$data.totalPage) {
+          this.$data.disableNextPage = true;
+        }
+      } else {
+        this.$nuxt.$userInsight.track(MixPanelAction.HideThumbnailClick, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.HideThumbnailClickAction, Origin: UserInsightOrigin.PrepareDocument }));
+      }
+      this.$data.showThumbContainer = !this.$data.showThumbContainer;
+      Accessibility.filterThumbnailElementIds(this.$data.showThumbContainer);
+      this.$emit('showThumb', this.$data.showThumbContainer);
+      this.hideToolTip();
+    },
+
+    clickNextPage (): void {
+      this.pdfFormElement.pdfInstance.navigation.goToPage(this.pdfFormElement.selectedPageIndex + 1);
+      const pageCount = UtilityMethods.getPageCount(this.documentProperties);
+      if (this.pdfFormElement.selectedPageIndex + 1 === pageCount) {
+        this.$data.disableNextPage = true;
+      }
+      this.$data.disablePreviousPage = false;
+      this.$data.currentPage = this.pdfFormElement.selectedPageIndex + 1 <= pageCount ? this.pdfFormElement.selectedPageIndex + 1 : pageCount;
+    },
+
+    clickPreviousPage (): void {
+      this.pdfFormElement.pdfInstance.navigation.goToPage(this.pdfFormElement.selectedPageIndex - 1);
+      if (this.pdfFormElement.selectedPageIndex - 1 === 1) {
+        this.$data.disablePreviousPage = true;
+      }
+      this.$data.disableNextPage = false;
+      this.$data.currentPage = this.pdfFormElement.selectedPageIndex - 1 >= 1 ? this.pdfFormElement.selectedPageIndex - 1 : 1;
+    },
+
+    thumbScrollChange (evt: Event): void {
+      if (!evt.cancelable) {
+        const scrollTop: number = (evt.target as HTMLElement).scrollTop;
+        if (this.$data.thumbData) {
+          const currentPageData = this.$data.thumbData.find((thumbData1: any) => thumbData1.scrollTop > scrollTop);
+          if (currentPageData && currentPageData.documentName !== this.$data.currentPdfFile) {
+            this.$data.currentPdfFile = currentPageData.documentName;
+            this.$data.thumbnailDocHeading = currentPageData.documentName;
+            this.$data.thumbnailDocPageCount = currentPageData.pageCount > 1 ? this.$t('thumbnailComponent.thumbnailPageCount', { pageCount: currentPageData.pageCount }) : this.$t('thumbnailComponent.thumbnailSinglePage', { pageCount: currentPageData.pageCount });
+          }
+        }
+      }
+    },
+
+    navigatePageFromThumbnail (index: number): void {
+      this.pdfFormElement.pdfInstance.navigation.goToPage(index);
+      this.$nuxt.$userInsight.track(MixPanelAction.PageChangeInThumbnailBar, new UserInsight({ Page: UserInsightPage.PreparePage, Action: UserInsightAction.PageChangeInThumbnailBarAction, Origin: UserInsightOrigin.PrepareDocument }));
+    },
+from thumbnail vue
+    deletePage ({ data }: ApiParamsType) {
+        return $axios.post('/api/PdfViewer/DeletePage', data);
+      }
+in index.ts
+
+[HttpPost("DeletePage")]
+[PolicyValidation(PolicyStatus = PolicyStatus.Internally)]
+public async Task<IActionResult> DeletePage([FromBody] DeletePageDetails deletePageDetails, CancellationToken token)
+{
+    try
+    {
+        var deletionResult = await this.pdfViewerService.DeletePage(deletePageDetails, token).ConfigureAwait(false);
+        if (deletionResult)
+        {
+            return this.Ok(new { success = true, message = "Page deleted successfully" });
+        }
+
+        return this.NotFound(new { success = false, message = "Page could not be deleted." });
+    }
+    catch (Exception ex)
+    {
+        return this.StatusCode(500, new { success = false, message = $"Internal server error: {ex.Message}" });
+    }
+}
+public async Task<bool> DeletePage(DeletePageDetails deletePageDetails, CancellationToken token)
+{
+    try
+    {
+        var organizationId = this.userDataService?.OrganizationId;
+        BlobContainerClient sourceBlobContainer = await this.CloudStorage.GetContainer(deletePageDetails.DocumentId, organizationId).ConfigureAwait(false);
+        var documentBlob = sourceBlobContainer.GetBlobClient(DbConstants.DocumentClient);
+        MemoryStream documentStream = new MemoryStream();
+        await this.CloudStorage.DownloadToStreamAsync(documentBlob, documentStream, true, token).ConfigureAwait(false);
+        using (PdfLoadedDocument loadedDocument = new PdfLoadedDocument(documentStream))
+        {
+            loadedDocument.Pages.RemoveAt(deletePageDetails.SelectedPageNo-1);
+            var downloadStream = new MemoryStream();
+            loadedDocument.Save(downloadStream);
+            downloadStream.Position = 0;
+            await this.CloudStorage.UploadFromStreamAsync(documentBlob, downloadStream, true).ConfigureAwait(false);
+        
+            Console.WriteLine($"Page {deletePageDetails.SelectedPageNo} removed successfully.");
+            return true;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error occurred: {ex.Message}");
+        return false;
+    }
+
+public async Task<string> Load(Dictionary<string, object> jsonObject, CancellationToken token)
+    {
+      string documentId = string.Empty;
+      string documentLoadDetails = string.Empty;
+      string documentPageDetails = string.Empty;
+      string scannedBlobName = string.Empty;
+      string signerId = string.Empty;
+
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      signerId = this.GetSignerId(jsonObject, this.httpContextAccessor.HttpContext);
+
+      if (string.IsNullOrEmpty(signerId))
+      {
+        throw new InvalidDataException(CommonResource.InvalidSignerId);
+      }
+
+      if (jsonObject.ContainsKey("document"))
+      {
+        documentLoadDetails = jsonObject["document"].ToString();
+      }
+      else if (jsonObject.ContainsKey("documentId") && string.IsNullOrEmpty(documentId))
+      {
+        documentLoadDetails = jsonObject["documentId"].ToString();
+      }
+
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+      scannedBlobName = isPrintSignDocument ? $"{DbConstants.ScannedDocument}/" : scannedBlobName;
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+        documentPageDetails = DbConstants.DocumentDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(documentLoadDetails);
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault().DocumentId : documentId;
+        documentPageDetails = isPrintSignDocument ? DbConstants.DocumentDetails : DbConstants.DocumentMergedDetails;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      BlobContainerClient blobContainer =
+        await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+      if (!await blobContainer.ExistsAsync().ConfigureAwait(false))
+      {
+        throw new InvalidDataException(CommonResource.InvalidDocumentId);
+      }
+
+      var blob = blobContainer.GetBlobClient($"{scannedBlobName}{documentPageDetails}");
+      var documentDetails = await this.CloudStorage.DownloadAsync<PdfViewerLoadDetails>(blob, false).ConfigureAwait(false);
+      documentDetails = this.AddUniqueIDToViewerLoadDetails(documentDetails, jsonObject);
+      documentDetails.SecretId = await this.secretkeyGenerationService.Generate(documentId, signerId).ConfigureAwait(false);
+      return documentDetails.ToNewsoftJson();
+    }
+
+    /// <inheritdoc/>
+    public async Task<byte[]> RenderPdfPages(Dictionary<string, object> jsonObject, BrowserType browserType, CancellationToken token)
+    {
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      int pageNumber = int.Parse(jsonObject["pageNumber"].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+      var intialPageNumber = pageNumber;
+      float scaleFactor = float.Parse(jsonObject["zoomFactor"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture);
+      string documentLoadDetails = jsonObject["documentId"].ToString();
+      string blobDirectoryName = string.Empty;
+      string documentId;
+      string scannedBlobName = string.Empty;
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(jsonObject["documentId"].ToString()); // JsonSerializer.Deserialize<DocumentProperties[]>(jsonObject["documentId"].ToString());
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault()?.DocumentId : documentId;
+        blobDirectoryName = GetBlobDirectoryName(ref pageNumber, viewerLoadDetails);
+      }
+
+      if (isPrintSignDocument)
+      {
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+        blobDirectoryName = string.Empty;
+        pageNumber = intialPageNumber;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      var blobContainer = await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+
+      var blobName = $"{scannedBlobName}{blobDirectoryName}{DbConstants.Page}-{pageNumber}-{scaleFactor}";
+      var webpBlobName = browserType switch
+      {
+        BrowserType.Chrome or BrowserType.Firefox or BrowserType.Edge => $"{blobName}-webp",
+        _ => blobName
+      };
+
+      var blob = blobContainer.GetBlobClient(webpBlobName);
+      PdfViewerImage imageDetails = null;
+      if (await blob.ExistsAsync(token).ConfigureAwait(false))
+      {
+        await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+        imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+      }
+      else
+      {
+        blob = blobContainer.GetBlobClient(blobName);
+        if (await blob.ExistsAsync(token).ConfigureAwait(false))
+        {
+          await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+          imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+        }
+      }
+
+      if (imageDetails == null)
+      {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+        imageDetails = await this.ExtractImageFromDocument(pageNumber, scaleFactor, blobDirectoryName, blobContainer, blob/*, token*/).ConfigureAwait(false);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+      }
+
+      return BinarySerializer.Serialize(this.AddUniqueIdToRenderImageDetails(imageDetails, intialPageNumber, jsonObject, scaleFactor));
+    }
+
+  private async Task UploadAndManipulateDocument(string parentId, string uniqueId, string childId, bool isPrintSignDocument, IDocumentUploadDetails documentUploadDetails, IResponseWriter responseWriter, CancellationToken cancellationToken)
+    {
+      string message = CommonResource.DocumentClientId + $" : {documentUploadDetails.DocumentClientId}\n" + CommonResource.DocumentId + $" : {uniqueId}";
+
+      await this.UpdateUploadProgress(message, false).ConfigureAwait(false);
+
+      string scannedBlobName = string.Empty;
+      DocumentDetails documentDetails = null;
+      BlobContainerClient cloudBlobContainer = null;
+      BlobContainerClient thumbnailCloudBlobContainer = null;
+      var userID = new UserDataService(this.httpContext).Id;
+
+      if (isPrintSignDocument)
+      {
+        uniqueId = documentUploadDetails.PrintSignDocumentId;
+        parentId = documentUploadDetails.PrintSignDocumentId;
+        childId = string.Empty;
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+      }
+
+      cloudBlobContainer = await this.CloudStorage.GetContainer(parentId, documentUploadDetails.OrganizationId)
+        .ConfigureAwait(false);
+      thumbnailCloudBlobContainer = await this.CloudStorage
+        .GetContainer($"{parentId}-{DbConstants.Thumbnails}", documentUploadDetails.OrganizationId)
+        .ConfigureAwait(false);
+
+      if (string.IsNullOrEmpty(childId) && string.IsNullOrEmpty(documentUploadDetails.PrintSignDocumentId))
+      {
+        await cloudBlobContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+        await thumbnailCloudBlobContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+      }
+
+      ValidateCorruptedPDFDocument(documentUploadDetails);
+      async Task ProgressCallback(string msg) => await this.UpdateUploadProgress(msg, false).ConfigureAwait(false);
+
+      var documentProgress = new DocumentProgress(4, ProgressCallback);
+      using Stream documentStream = await this.GetPdfDocumentStream(documentUploadDetails, cloudBlobContainer, thumbnailCloudBlobContainer, childId, documentProgress).ConfigureAwait(false);
+      PdfDocument.EnableCache = false;
+      using var pdfLoadedDocument = new PdfLoadedDocument(documentUploadDetails.DocumentArray);
+      if (pdfLoadedDocument.IsXFAForm && pdfLoadedDocument.Form.Fields.Count == 0)
+      {
+        throw new InvalidDataException(CommonResource.DynamicXFAErrorMessage);
+      }
+
+      var contentType = DocumentContentType.GetDocumentType(documentUploadDetails.ContentType);
+      if (contentType != ContentType.Images)
+      {
+        try
+        {
+          var tasks = new List<Task>();
+          tasks.Add(this.ProcessAndExtractPdfFormFields(pdfLoadedDocument, parentId, childId, documentUploadDetails.OrganizationId));
+          tasks.Add(this.ExtractAndStoreTextTagFormFields(pdfLoadedDocument, parentId, childId, documentUploadDetails));
+          await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+          this.logger.LogError(ex, CommonResource.ExtractfieldError);
+        }
+      }
+
+      try
+      {
+        if (contentType != ContentType.Images
+            && (documentUploadDetails.UploadRequestType == UploadRequestType.Template || documentUploadDetails.UploadRequestType == UploadRequestType.UseTemplate))
+        {
+          var blobClientDocumentText = cloudBlobContainer.GetBlobClient($"{childId}{DbConstants.DocumentText}");
+          await this.GetDocumentText(pdfLoadedDocument, blobClientDocumentText).ConfigureAwait(false);
+        }
+      }
+      catch (Exception e)
+      {
+        this.logger.LogError(e, "Unable to extract document text for template auto positioning");
+      }
+
+      // we are writing the document id in response initially then we will only write in SignalR, hence we disable response write after we have written the document id
+      if (responseWriter is ResponseWriter<HttpResponse> res)
+      {
+        var docIdResponse = new { documentId = uniqueId, documentClientId = documentUploadDetails.DocumentClientId, pageCount = pdfLoadedDocument.PageCount, isTaggedPdf = pdfLoadedDocument.FileStructure?.TaggedPdf ?? false };
+        await res.WriteAsync(docIdResponse.ToJson()).ConfigureAwait(false);
+        responseWriter = null;
+      }
+
+      pdfLoadedDocument.EnableMemoryOptimization = true;
+
+      var conetntType = DocumentContentType.GetDocumentType(documentUploadDetails.ContentType, documentUploadDetails.DocumentName);
+
+      if (isPrintSignDocument)
+      {
+        documentDetails = await this.GetPrintSignDocumentDetails(this.httpContext, pdfLoadedDocument.PageCount, documentUploadDetails).ConfigureAwait(false);
+        documentUploadDetails.DocumentVersion = documentDetails.DocumentVersion;
+      }
+
+      if (string.IsNullOrEmpty(documentUploadDetails.IsEditTemplate) || !(bool.TryParse(documentUploadDetails.IsEditTemplate, out bool isEditTemplate) && isEditTemplate))
+      {
+        await this.ValidateDocument(documentUploadDetails, pdfLoadedDocument, cloudBlobContainer).ConfigureAwait(false);
+      }
+
+      MemoryStream manipulatedDocumentStream = null;
+      Task documentCLientUploadTask = null;
+      try
+      {
+        var blobClientDocument = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.DocumentClient}");
+        documentStream.Position = 0;
+        documentCLientUploadTask = this.CloudStorage.UploadFromStreamAsync(blobClientDocument, documentStream, true);
+        manipulatedDocumentStream = await this.ManipulatePDF(pdfLoadedDocument, documentProgress, parentId, conetntType, uniqueId, documentUploadDetails.OrganizationId).ConfigureAwait(false);
+
+        if (manipulatedDocumentStream == null)
+        {
+          throw new NullReferenceException(CommonResource.EmptyManipulatedDocumentStream);
+        }
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, CommonResource.ErrorWhileUploading);
+
+        throw;
+      }
+
+      documentProgress.Reset();
+      var documentUploadProgress = new Progress<long>();
+      var documentLength = manipulatedDocumentStream.Length;
+
+      async void UploadDocumentHandler(object sender, long bytesUploaded)
+      {
+        await (documentProgress?.UpdateUploadProgress(bytesUploaded, documentLength)).ConfigureAwait(false);
+      }
+
+      documentUploadProgress.ProgressChanged += UploadDocumentHandler;
+
+      var blobClient = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.Document}");
+      try
+      {
+        manipulatedDocumentStream.Position = 0;
+
+        // Upload the manipulated PDF document.
+        await this.CloudStorage.UploadFromStreamAsync(blobClient, manipulatedDocumentStream, true, documentUploadProgress, cancellationToken).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, CommonResource.ErrorWhileUploading);
+      }
+
+      await documentCLientUploadTask.ConfigureAwait(false);
+      manipulatedDocumentStream.Position = 0;
+      float zoomFactor = GetZoomFactor(documentUploadDetails?.DocumentVersion);
+      try
+      {
+        // Images will be uploaded directly so no need of uploading it by converting PDF to image
+        if (conetntType != ContentType.Images)
+        {
+          // Upload PDF viewer objects like page count, page size, images and thumbnail.
+          blobClient = await this.UploadPdfViewerObjects(
+            childId,
+            documentUploadDetails.OrganizationId,
+            documentProgress,
+            manipulatedDocumentStream,
+            cloudBlobContainer,
+            parentId,
+            scannedBlobName,
+            documentDetails,
+            zoomFactor,
+            cancellationToken).ConfigureAwait(false);
+        }
+
+        await this.UpdateUploadProgress(string.Format(CultureInfo.InvariantCulture, "Completed"), false).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, CommonResource.ErrorWhileUploading);
+
+        throw;
+      }
+      finally
+      {
+        documentStream.Dispose();
+        manipulatedDocumentStream?.Dispose();
+        documentUploadProgress.ProgressChanged -= UploadDocumentHandler;
+
+        // Release all the fonts which are cached
+        PdfDocument.ClearFontCache();
+      }
+    }
+
+
