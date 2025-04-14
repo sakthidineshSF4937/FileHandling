@@ -607,3 +607,49 @@ public async Task<bool> DeletePage(DeletePageDetails deletePageDetails, Cancella
 
       return BinarySerializer.Serialize(this.AddUniqueIdToRenderImageDetails(imageDetails, intialPageNumber, jsonObject, scaleFactor));
     }
+    async deletePage(documentId: string, pageNumber: number) {
+  try {
+    // Show loading/processing state
+    this.$data.thumbState = ' show-progress';
+
+    const payload = {
+      documentId,
+      selectedPageNo: pageNumber
+    };
+    
+        const response = await this.$nuxt.$api.thumbnail.deletePage({ data: payload });
+
+    if (response.success) {
+      // Remove the deleted page from thumbData
+      this.$data.thumbData = this.$data.thumbData.filter(thumbnail => {
+        const thumbPageNumber = parseInt(thumbnail.pageId.split('_')[1], 10);
+        return thumbPageNumber !== pageNumber;
+      });
+      
+      // Update page numbers for remaining thumbnails
+      this.$data.thumbData.forEach((thumbnail, index) => {
+            thumbnail.currentDocumentPageNumber = index + 1;
+      });
+      debugger
+      // Update total page count
+      this.$data.totalPage = this.$data.thumbData.length;
+      
+      // Update the PDF viewer
+      this.pdfFormElement.pdfInstance.load(this.$session.mainData.parentDocumentId, null);
+      
+      // Show success message
+      const context = this as any;
+      const toastObj = context.$refs.customToast;
+      toastObj.show(context.$t('thumbnailComponent.pageDeletedSuccess'), 'bs_toast_success', 'bs_success_icon', null, 3000);
+    } else {
+      throw new Error(response.message || 'Failed to delete page');
+    }
+  } catch (error) {
+    console.error("Error deleting page:", error);
+    const context = this as any;
+    const toastObj = context.$refs.customToast;
+    toastObj.show(context.$t('thumbnailComponent.pageDeleteFailed'), 'bs_toast_error', 'bs_error_icon', null, 3000);
+  } finally {
+    this.$data.thumbState = '';
+  }
+},
