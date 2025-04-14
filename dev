@@ -1,0 +1,609 @@
+    private async Task<BlobClient> UploadPdfViewerObjects(string childId, string organizationId, DocumentProgress documentProgress, Stream manipulatedDocumentStream, BlobContainerClient cloudBlobContainer, string parentId, string scannedBlobName, DocumentDetails documentDetails, float zoomFactor, CancellationToken cancellationToken)
+    {
+      var thumbnailCloudBlobContainer = await this.CloudStorage
+        .GetContainer($"{parentId}-{DbConstants.Thumbnails}", organizationId).ConfigureAwait(false);
+
+      BlobClient blobClient = null;
+      PdfRenderer renderer = null;
+      try
+      {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+        renderer = new PdfRenderer();
+#pragma warning restore CA2000 // Dispose objects before losing scope
+
+        var pageDetails = renderer.LoadDocument(manipulatedDocumentStream, null, out var documentPtr); // await Task.FromResult(renderer.LoadDocument(manipulatedDocumentStream, null, out var documentPtr)).ConfigureAwait(false);
+        var pageCount = pageDetails.Count;
+        var pdfViewerLoadObject = new PdfViewerLoadDetails
+        {
+          PageCount = pageDetails.Count,
+          PageSizes = pageDetails,
+          DocumentLiveCount = 1,
+        };
+        documentProgress.Reset();
+
+        var exportProgress = 0;
+        documentProgress.Reset();
+        var pageTask = new Task[pageCount];
+        var webpTask = new Task[pageCount];
+        for (int i = 0; i < pageCount; i++)
+        {
+          cancellationToken.ThrowIfCancellationRequested();
+          SizeF pageSize = pageDetails[i];
+          var pagePtr = PdfiumViewer.FPDF_LoadPage(documentPtr, i);
+
+#pragma warning disable CA2000 // Dispose objects before losing scope
+          var pageContent = PdfExport.ExportImage(pagePtr, zoomFactor, pageSize);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+
+          if (!string.IsNullOrEmpty(scannedBlobName))
+          {
+            var message = $"Processing page {i + 1} 0f {pageCount}";
+            await this.UpdateUploadProgress(message, false).ConfigureAwait(false);
+
+            pageContent = await this.imageUtilityService.CompareAndDeSkewImage(
+              pageContent, i, documentDetails, pdfViewerLoadObject).ConfigureAwait(false);
+          }
+
+          byte[] imageSerialized = BinarySerializer.Serialize(new PdfViewerImage
+          {
+            PngBytes = pageContent.PngBytes,
+            ScaleFactor = pageContent.ScaleFactor,
+          });
+#pragma warning disable CA2000 // This object will be disposed asynchronously after the upload is completed
+          var thumbnailContent = PdfExport.ExportPageAsThumbnail(pagePtr);
+#pragma warning restore CA2000 // This object will be disposed asynchronously after the upload is completed
+          var thumbnailBlobClient = thumbnailCloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.Thumbnail}-{i}.png");
+          thumbnailContent.Position = 0;
+
+#pragma warning disable CA2008 // Do not create tasks without passing a TaskScheduler
+          _ = thumbnailBlobClient.UploadAsync(thumbnailContent)
+            .ContinueWith(
+              async x =>
+              {
+                if (x.IsCompleted)
+                {
+                  await thumbnailContent.DisposeAsync().ConfigureAwait(false);
+                }
+              })
+            .ConfigureAwait(false);
+#pragma warning restore CA2008 // Do not create tasks without passing a TaskScheduler
+
+          webpTask[i] = this.UploadWebPToBlob(childId, scannedBlobName, pageContent.WebPBytes, i, cloudBlobContainer, zoomFactor);
+
+          // Upload page image with pattern, page-[page-number]-[zoom-factor].
+          var blockBlob = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.Page}-{i}-{zoomFactor}");
+
+#pragma warning disable CA2008 // Do not create tasks without passing a TaskScheduler
+          pageTask[i] = this.CloudStorage.UploadFromByteArrayAsync(blockBlob, imageSerialized, 0, false)
+            .ContinueWith(
+              x =>
+              {
+                pageContent.Dispose();
+                imageSerialized = null;
+              });
+#pragma warning restore CA2008 // Do not create tasks without passing a TaskScheduler
+
+          // The Interlocked usage is essential to avoid getting race-conditions.
+          Interlocked.Increment(ref exportProgress);
+
+          // Progress is updated until last before page of the document
+          if (exportProgress < pageCount)
+          {
+            await documentProgress.UpdateUploadProgress(exportProgress, pageCount).ConfigureAwait(false);
+            pageContent.Dispose();
+          }
+
+          PdfiumViewer.FPDF_ClosePage(pagePtr);
+        }
+
+        await Task.WhenAll(pageTask).ConfigureAwait(false);
+
+        // Upload PDF viewer load object e.g. page count and page sizes.
+        blobClient = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.DocumentDetails}");
+        byte[] bytes = BinarySerializer.Serialize(pdfViewerLoadObject);
+
+        await this.CloudStorage.UploadFromByteArrayAsync(blobClient, bytes, 0, false).ContinueWith(x => bytes = null, TaskScheduler.Current).ConfigureAwait(false);
+
+        // Last page progress is updated after completeion of all upload tasks
+        await documentProgress.UpdateUploadProgress(exportProgress, pageCount).ConfigureAwait(false);
+
+        PdfiumViewer.FPDF_CloseDocument(documentPtr);
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, ex.Message);
+
+        throw;
+      }
+      finally
+      {
+        renderer?.Dispose(renderer.PdfDocumentId);
+      }
+
+      return blobClient;
+    }
+private async Task UploadWebPToBlob(string childId, string scannedBlobName,
+      byte[] webpBytes, int pageNumber, BlobContainerClient cloudBlobContainer,
+      float zoomFactor)
+    {
+      using var pageContent = new PdfViewerImage
+      {
+        PngBytes = webpBytes,
+        ScaleFactor = PdfExport.Scale,
+      };
+
+      // Upload page image with pattern, page-[page-number]-[zoom-factor]-webp.
+      var blockBlob = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.Page}-{pageNumber}-{zoomFactor}-webp");
+      byte[] imageSerialized = BinarySerializer.Serialize(pageContent);
+      await this.CloudStorage.UploadFromByteArrayAsync(blockBlob, imageSerialized, 0, false).ContinueWith(x => imageSerialized = null, TaskScheduler.Current).ConfigureAwait(false);
+    }
+  private async Task UploadAndManipulateDocument(string parentId, string uniqueId, string childId, bool isPrintSignDocument, IDocumentUploadDetails documentUploadDetails, IResponseWriter responseWriter, CancellationToken cancellationToken)
+    {
+      string message = CommonResource.DocumentClientId + $" : {documentUploadDetails.DocumentClientId}\n" + CommonResource.DocumentId + $" : {uniqueId}";
+
+      await this.UpdateUploadProgress(message, false).ConfigureAwait(false);
+
+      string scannedBlobName = string.Empty;
+      DocumentDetails documentDetails = null;
+      BlobContainerClient cloudBlobContainer = null;
+      BlobContainerClient thumbnailCloudBlobContainer = null;
+      var userID = new UserDataService(this.httpContext).Id;
+
+      if (isPrintSignDocument)
+      {
+        uniqueId = documentUploadDetails.PrintSignDocumentId;
+        parentId = documentUploadDetails.PrintSignDocumentId;
+        childId = string.Empty;
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+      }
+
+      cloudBlobContainer = await this.CloudStorage.GetContainer(parentId, documentUploadDetails.OrganizationId)
+        .ConfigureAwait(false);
+      thumbnailCloudBlobContainer = await this.CloudStorage
+        .GetContainer($"{parentId}-{DbConstants.Thumbnails}", documentUploadDetails.OrganizationId)
+        .ConfigureAwait(false);
+
+      if (string.IsNullOrEmpty(childId) && string.IsNullOrEmpty(documentUploadDetails.PrintSignDocumentId))
+      {
+        await cloudBlobContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+        await thumbnailCloudBlobContainer.CreateIfNotExistsAsync().ConfigureAwait(false);
+      }
+
+      ValidateCorruptedPDFDocument(documentUploadDetails);
+      async Task ProgressCallback(string msg) => await this.UpdateUploadProgress(msg, false).ConfigureAwait(false);
+
+      var documentProgress = new DocumentProgress(4, ProgressCallback);
+      using Stream documentStream = await this.GetPdfDocumentStream(documentUploadDetails, cloudBlobContainer, thumbnailCloudBlobContainer, childId, documentProgress).ConfigureAwait(false);
+      PdfDocument.EnableCache = false;
+      using var pdfLoadedDocument = new PdfLoadedDocument(documentUploadDetails.DocumentArray);
+      if (pdfLoadedDocument.IsXFAForm && pdfLoadedDocument.Form.Fields.Count == 0)
+      {
+        throw new InvalidDataException(CommonResource.DynamicXFAErrorMessage);
+      }
+
+      var contentType = DocumentContentType.GetDocumentType(documentUploadDetails.ContentType);
+      if (contentType != ContentType.Images)
+      {
+        try
+        {
+          var tasks = new List<Task>();
+          tasks.Add(this.ProcessAndExtractPdfFormFields(pdfLoadedDocument, parentId, childId, documentUploadDetails.OrganizationId));
+          tasks.Add(this.ExtractAndStoreTextTagFormFields(pdfLoadedDocument, parentId, childId, documentUploadDetails));
+          await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+          this.logger.LogError(ex, CommonResource.ExtractfieldError);
+        }
+      }
+
+      try
+      {
+        if (contentType != ContentType.Images
+            && (documentUploadDetails.UploadRequestType == UploadRequestType.Template || documentUploadDetails.UploadRequestType == UploadRequestType.UseTemplate))
+        {
+          var blobClientDocumentText = cloudBlobContainer.GetBlobClient($"{childId}{DbConstants.DocumentText}");
+          await this.GetDocumentText(pdfLoadedDocument, blobClientDocumentText).ConfigureAwait(false);
+        }
+      }
+      catch (Exception e)
+      {
+        this.logger.LogError(e, "Unable to extract document text for template auto positioning");
+      }
+
+      // we are writing the document id in response initially then we will only write in SignalR, hence we disable response write after we have written the document id
+      if (responseWriter is ResponseWriter<HttpResponse> res)
+      {
+        var docIdResponse = new { documentId = uniqueId, documentClientId = documentUploadDetails.DocumentClientId, pageCount = pdfLoadedDocument.PageCount, isTaggedPdf = pdfLoadedDocument.FileStructure?.TaggedPdf ?? false };
+        await res.WriteAsync(docIdResponse.ToJson()).ConfigureAwait(false);
+        responseWriter = null;
+      }
+
+      pdfLoadedDocument.EnableMemoryOptimization = true;
+
+      var conetntType = DocumentContentType.GetDocumentType(documentUploadDetails.ContentType, documentUploadDetails.DocumentName);
+
+      if (isPrintSignDocument)
+      {
+        documentDetails = await this.GetPrintSignDocumentDetails(this.httpContext, pdfLoadedDocument.PageCount, documentUploadDetails).ConfigureAwait(false);
+        documentUploadDetails.DocumentVersion = documentDetails.DocumentVersion;
+      }
+
+      if (string.IsNullOrEmpty(documentUploadDetails.IsEditTemplate) || !(bool.TryParse(documentUploadDetails.IsEditTemplate, out bool isEditTemplate) && isEditTemplate))
+      {
+        await this.ValidateDocument(documentUploadDetails, pdfLoadedDocument, cloudBlobContainer).ConfigureAwait(false);
+      }
+
+      MemoryStream manipulatedDocumentStream = null;
+      Task documentCLientUploadTask = null;
+      try
+      {
+        var blobClientDocument = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.DocumentClient}");
+        documentStream.Position = 0;
+        documentCLientUploadTask = this.CloudStorage.UploadFromStreamAsync(blobClientDocument, documentStream, true);
+        manipulatedDocumentStream = await this.ManipulatePDF(pdfLoadedDocument, documentProgress, parentId, conetntType, uniqueId, documentUploadDetails.OrganizationId).ConfigureAwait(false);
+
+        if (manipulatedDocumentStream == null)
+        {
+          throw new NullReferenceException(CommonResource.EmptyManipulatedDocumentStream);
+        }
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, CommonResource.ErrorWhileUploading);
+
+        throw;
+      }
+
+      documentProgress.Reset();
+      var documentUploadProgress = new Progress<long>();
+      var documentLength = manipulatedDocumentStream.Length;
+
+      async void UploadDocumentHandler(object sender, long bytesUploaded)
+      {
+        await (documentProgress?.UpdateUploadProgress(bytesUploaded, documentLength)).ConfigureAwait(false);
+      }
+
+      documentUploadProgress.ProgressChanged += UploadDocumentHandler;
+
+      var blobClient = cloudBlobContainer.GetBlobClient($"{scannedBlobName}{childId}{DbConstants.Document}");
+      try
+      {
+        manipulatedDocumentStream.Position = 0;
+
+        // Upload the manipulated PDF document.
+        await this.CloudStorage.UploadFromStreamAsync(blobClient, manipulatedDocumentStream, true, documentUploadProgress, cancellationToken).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, CommonResource.ErrorWhileUploading);
+      }
+
+      await documentCLientUploadTask.ConfigureAwait(false);
+      manipulatedDocumentStream.Position = 0;
+      float zoomFactor = GetZoomFactor(documentUploadDetails?.DocumentVersion);
+      try
+      {
+        // Images will be uploaded directly so no need of uploading it by converting PDF to image
+        if (conetntType != ContentType.Images)
+        {
+          // Upload PDF viewer objects like page count, page size, images and thumbnail.
+          blobClient = await this.UploadPdfViewerObjects(
+            childId,
+            documentUploadDetails.OrganizationId,
+            documentProgress,
+            manipulatedDocumentStream,
+            cloudBlobContainer,
+            parentId,
+            scannedBlobName,
+            documentDetails,
+            zoomFactor,
+            cancellationToken).ConfigureAwait(false);
+        }
+
+        await this.UpdateUploadProgress(string.Format(CultureInfo.InvariantCulture, "Completed"), false).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        this.logger.LogError(ex, CommonResource.ErrorWhileUploading);
+
+        throw;
+      }
+      finally
+      {
+        documentStream.Dispose();
+        manipulatedDocumentStream?.Dispose();
+        documentUploadProgress.ProgressChanged -= UploadDocumentHandler;
+
+        // Release all the fonts which are cached
+        PdfDocument.ClearFontCache();
+      }
+    }
+  private async Task<MemoryStream> ManipulatePDF(PdfLoadedDocument loadedDocument, DocumentProgress documentProgress, string documentId, ContentType contentType, string subDocumentId, string organizationId, bool isCloneProcess = false, bool canDrawDocId = false)
+    {
+      MemoryStream manipulatedDocumentStream = null;
+      loadedDocument.FileStructure.IncrementalUpdate = false;
+      if (loadedDocument.IsPortfolio)
+      {
+        throw new PdfException(string.Format(CultureInfo.InvariantCulture, Constants.Portfolio));
+      }
+
+      if (loadedDocument.Form != null && loadedDocument.Form.Fields.Count > 0)
+      {
+        loadedDocument.Form.Flatten = true;
+      }
+
+      if (loadedDocument.IsEncrypted)
+      {
+        loadedDocument.Security.OwnerPassword = string.Empty;
+        loadedDocument.Security.Permissions = PdfPermissionsFlags.Default;
+      }
+
+      loadedDocument.DocumentInformation.Title = string.Empty;
+      loadedDocument.DocumentInformation.Creator =
+        Constants.SyncfusionPdfLibrary + " - " + Constants.PdfLibraryLink;
+      loadedDocument.DocumentInformation.Producer = Constants.SyncfusionPdfLibrary;
+      loadedDocument.DocumentInformation.AddCustomMetaDataInfo(CommonResource.DocumentIdMetaData, documentId);
+
+      if (loadedDocument.Layers != null)
+      {
+        var layerCount = loadedDocument.Layers.Count;
+        for (var i = layerCount - 1; i >= 0; i--)
+        {
+          loadedDocument.Layers.Remove(loadedDocument.Layers[i], false);
+        }
+      }
+
+      int loadedPageCount = loadedDocument.Pages.Count;
+      if (contentType != ContentType.Images)
+      {
+        string pageCountPattern = string.Format(CultureInfo.InvariantCulture, $"\n{Constants.PageCount} : {loadedPageCount.ToString(CultureInfo.InvariantCulture)}\n {Constants.IsTaggedPdf} : {loadedDocument.FileStructure?.TaggedPdf}");
+        if (!isCloneProcess)
+        {
+          await this.UpdateUploadProgress(pageCountPattern, false).ConfigureAwait(false);
+        }
+      }
+
+      string docIdText = string.Empty;
+
+      if (canDrawDocId)
+      {
+        docIdText = CommonResource.DocumentIdText + documentId;
+      }
+
+      var uploadTasks = new List<Task>();
+      for (var i = 0; i < loadedPageCount; i++)
+      {
+        var loadedPage = loadedDocument.Pages[i];
+        loadedPage.Annotations.Flatten = true;
+
+        if (canDrawDocId)
+        {
+          DrawDocumentId(loadedPage, docIdText);
+        }
+
+        if (!isCloneProcess && loadedDocument.FileStructure.TaggedPdf)
+        {
+          uploadTasks.Add(this.UploadTaggedPdfContent(loadedDocument, documentId, subDocumentId, i, organizationId));
+        }
+      }
+
+      await Task.WhenAll(uploadTasks).ConfigureAwait(false);
+      void PdfHandler(object sender, ProgressEventArgs arguments)
+      {
+        if (documentProgress != null)
+        {
+          _ = documentProgress.UpdateOverallProgress(arguments.Progress * 100);
+        }
+      }
+
+      if (!isCloneProcess)
+      {
+        loadedDocument.SaveProgress += PdfHandler;
+      }
+
+      manipulatedDocumentStream = new MemoryStream();
+      loadedDocument.Save(manipulatedDocumentStream);
+      loadedDocument.SaveProgress -= PdfHandler;
+      return manipulatedDocumentStream;
+    }
+public async Task<bool> DeletePage(DeletePageDetails deletePageDetails, CancellationToken token)
+{
+    try
+    {
+        var organizationId = this.userDataService?.OrganizationId;
+        BlobContainerClient container = await this.CloudStorage
+            .GetContainer(deletePageDetails.DocumentId, organizationId)
+            .ConfigureAwait(false);
+            
+        // 1. Get the original PDF
+        var documentBlob = container.GetBlobClient(DbConstants.Document);
+        using var documentStream = new MemoryStream();
+        await this.CloudStorage.DownloadToStreamAsync(documentBlob, documentStream, true, token)
+            .ConfigureAwait(false);
+        
+        // 2. Modify the PDF
+        using (var loadedDocument = new PdfLoadedDocument(documentStream))
+        {
+     
+           
+            // Remove the specific page
+            loadedDocument.Pages.RemoveAt(deletePageDetails.SelectedPageNo - 1);
+            
+            // 3. Save the modified PDF
+            using var modifiedStream = new MemoryStream();
+            loadedDocument.Save(modifiedStream);
+            modifiedStream.Position = 0;
+            
+         //   "d035bafe-10bc-4cca-b6a0-d1c8262c11c9/page-0-1-webp"
+            
+            // 4. Upload the modified PDF
+            await this.CloudStorage.UploadFromStreamAsync(documentBlob, modifiedStream, true)
+                .ConfigureAwait(false);
+
+             var blobName = $"{deletePageDetails.DocumentId}{"/"}{DbConstants.Page}-{deletePageDetails.SelectedPageNo-1}-{"1"}-webp"; 
+             var blob = container.GetBlobClient(blobName);   
+
+                await container.DeleteBlobIfExistsAsync(blob.Name, cancellationToken: token)
+                .ConfigureAwait(false);
+            
+            // 5. Delete ONLY the cached images for the deleted page
+            // await this.DeleteCachedPagesForSinglePage(container, deletePageDetails.SelectedPageNo, token)
+            //     .ConfigureAwait(false);
+            
+            return true;
+        }
+    }
+    catch (Exception ex)
+    {
+        this.logger.LogError(ex, "Error deleting page");
+        return false;
+    }
+}   public async Task<string> Load(Dictionary<string, object> jsonObject, CancellationToken token)
+    {
+      string documentId = string.Empty;
+      string documentLoadDetails = string.Empty;
+      string documentPageDetails = string.Empty;
+      string scannedBlobName = string.Empty;
+      string signerId = string.Empty;
+
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      signerId = this.GetSignerId(jsonObject, this.httpContextAccessor.HttpContext);
+
+      if (string.IsNullOrEmpty(signerId))
+      {
+        throw new InvalidDataException(CommonResource.InvalidSignerId);
+      }
+
+      if (jsonObject.ContainsKey("document"))
+      {
+        documentLoadDetails = jsonObject["document"].ToString();
+      }
+      else if (jsonObject.ContainsKey("documentId") && string.IsNullOrEmpty(documentId))
+      {
+        documentLoadDetails = jsonObject["documentId"].ToString();
+      }
+
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+      scannedBlobName = isPrintSignDocument ? $"{DbConstants.ScannedDocument}/" : scannedBlobName;
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+        documentPageDetails = DbConstants.DocumentDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(documentLoadDetails);
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault().DocumentId : documentId;
+        documentPageDetails = isPrintSignDocument ? DbConstants.DocumentDetails : DbConstants.DocumentMergedDetails;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      BlobContainerClient blobContainer =
+        await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+      if (!await blobContainer.ExistsAsync().ConfigureAwait(false))
+      {
+        throw new InvalidDataException(CommonResource.InvalidDocumentId);
+      }
+
+      var blob = blobContainer.GetBlobClient($"{scannedBlobName}{documentPageDetails}");
+      var documentDetails = await this.CloudStorage.DownloadAsync<PdfViewerLoadDetails>(blob, false).ConfigureAwait(false);
+      documentDetails = this.AddUniqueIDToViewerLoadDetails(documentDetails, jsonObject);
+      documentDetails.SecretId = await this.secretkeyGenerationService.Generate(documentId, signerId).ConfigureAwait(false);
+      return documentDetails.ToNewsoftJson();
+    }
+
+    /// <inheritdoc/>
+    public async Task<byte[]> RenderPdfPages(Dictionary<string, object> jsonObject, BrowserType browserType, CancellationToken token)
+    {
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      int pageNumber = int.Parse(jsonObject["pageNumber"].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+      var intialPageNumber = pageNumber;
+      float scaleFactor = float.Parse(jsonObject["zoomFactor"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture);
+      string documentLoadDetails = jsonObject["documentId"].ToString();
+      string blobDirectoryName = string.Empty;
+      string documentId;
+      string scannedBlobName = string.Empty;
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(jsonObject["documentId"].ToString()); // JsonSerializer.Deserialize<DocumentProperties[]>(jsonObject["documentId"].ToString());
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault()?.DocumentId : documentId;
+        blobDirectoryName = GetBlobDirectoryName(ref pageNumber, viewerLoadDetails);
+      }
+
+      if (isPrintSignDocument)
+      {
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+        blobDirectoryName = string.Empty;
+        pageNumber = intialPageNumber;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      var blobContainer = await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+
+      var blobName = $"{scannedBlobName}{blobDirectoryName}{DbConstants.Page}-{pageNumber}-{scaleFactor}";
+      var webpBlobName = browserType switch
+      {
+        BrowserType.Chrome or BrowserType.Firefox or BrowserType.Edge => $"{blobName}-webp",
+        _ => blobName
+      };
+
+      var blob = blobContainer.GetBlobClient(webpBlobName);
+      PdfViewerImage imageDetails = null;
+      if (await blob.ExistsAsync(token).ConfigureAwait(false))
+      {
+        await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+        imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+      }
+      else
+      {
+        blob = blobContainer.GetBlobClient(blobName);
+        if (await blob.ExistsAsync(token).ConfigureAwait(false))
+        {
+          await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+          imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+        }
+      }
+
+      if (imageDetails == null)
+      {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+        imageDetails = await this.ExtractImageFromDocument(pageNumber, scaleFactor, blobDirectoryName, blobContainer, blob/*, token*/).ConfigureAwait(false);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+      }
+
+      return BinarySerializer.Serialize(this.AddUniqueIdToRenderImageDetails(imageDetails, intialPageNumber, jsonObject, scaleFactor));
+    }
