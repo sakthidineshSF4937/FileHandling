@@ -269,14 +269,143 @@
       loadedDocument.SaveProgress -= PdfHandler;
       return manipulatedDocumentStream;
     }
-//Create an instance of PdfDocument
-using (PdfLoadedDocument loadedDocument = new PdfLoadedDocument("Data/Input.pdf"))
+public async Task<bool> DeletePage(DeletePageDetails deletePageDetails, CancellationToken token)
 {
- //Remove the first page in the PDF document
+    try
+    {
+        var organizationId = this.userDataService?.OrganizationId;
+        BlobContainerClient container = await this.CloudStorage
+            .GetContainer(deletePageDetails.DocumentId, organizationId)
+            .ConfigureAwait(false);
 
- loadedDocument.Pages.RemoveAt(0);
+        var documentBlob = container.GetBlobClient(DbConstants.Document);
+        using var documentStream = new MemoryStream();
+        await this.CloudStorage.DownloadToStreamAsync(documentBlob, documentStream, true, token)
+            .ConfigureAwait(false);
 
- //Save and close the document
- loadedDocument.Save("Output.pdf");
+        using (var loadedDocument = new PdfLoadedDocument(documentStream))
+        {
+            loadedDocument.Pages.RemoveAt(deletePageDetails.SelectedPageNo - 1);
+
+            using var modifiedStream = new MemoryStream();
+            loadedDocument.Save(modifiedStream);
+            modifiedStream.Position = 0;
+
+            await this.CloudStorage.UploadFromStreamAsync(documentBlob, modifiedStream, true)
+                .ConfigureAwait(false);
+
+            string parentId = string.Empty;
+            string baseContainerName = string.IsNullOrEmpty(parentId)
+                ? $"{deletePageDetails.DocumentId}-{DbConstants.Thumbnails}"
+                : $"{parentId}-{DbConstants.Thumbnails}";
+
+            BlobContainerClient blobThumbnailContainer = await this.CloudStorage
+                .GetContainer(baseContainerName, organizationId).ConfigureAwait(false);
+
+            await this.DeleteThumbnail(deletePageDetails, blobThumbnailContainer, deletePageDetails.SelectedPageNo, parentId, token);
+
+            await this.DeleteAllPageCaches(container,deletePageDetails,deletePageDetails.SelectedPageNo - 1, token);
+            
+            return true;
+        }
+    }
+    catch (Exception ex)
+    {
+        this.logger.LogError(ex, "Error deleting page");
+        return false;
+    }
+}
+
+private async Task DeleteThumbnail(DeletePageDetails deletePageDetails, BlobContainerClient container, int pageIndex, string parentId, CancellationToken token)
+{
+    try
+    {
+      var selectedpage=pageIndex-1;
+        string blobPath = string.IsNullOrEmpty(parentId)
+            ? $"{DbConstants.Thumbnail}-{selectedpage}.png"
+            : $"{deletePageDetails.DocumentId}/{DbConstants.Thumbnail}-{selectedpage}.png";
+
+        this.logger.LogInformation("Attempting to delete thumbnail: {BlobPath} from container: {ContainerName}", blobPath, container.Name);
+
+        var blob = container.GetBlobClient(blobPath);
+
+        await container.DeleteBlobIfExistsAsync(blob.Name, cancellationToken: token).ConfigureAwait(false);
+
+        Console.WriteLine("Thumbnail Deleted");
+    }
+    catch (Exception ex)
+    {
+        this.logger.LogError(ex, "Error deleting Thumbnail");
+        // throw; // Uncomment if you want to surface the exception for debugging
+    }
+}
+
+private async Task DeleteAllPageCaches(BlobContainerClient container,DeletePageDetails deletePage ,int pageIndex, CancellationToken token)
+{
+    try
+    {
+        var parentId=String.Empty;
+        var blobDirectoryName=string.Empty;
+        if (string.IsNullOrEmpty(parentId))
+        {
+            blobDirectoryName = $"{deletePage.DocumentId}/";
+        }
+        // var scaleFactor=1;  
+        // var blobName = $"{blobDirectoryName}{DbConstants.Page}-{pageIndex}-{scaleFactor}-webp";
+        // //8690605c-bcf8-4a3d-88ed-5e644424bb98/page-0-1-webp
+        // var pageblob = container.GetBlobsAsync(prefix:$"{blobName}");
+        // await foreach (var blob1 in pageblob)
+        // {
+        //   // var page1=await container.DeleteIfExistsAsync(blob1.Name,conditions=null,cancellationToken: token).ConfigureAwait(false);
+        //  var page=await container.DeleteBlobIfExistsAsync(blob1.Name, conditions: null, cancellationToken: token).ConfigureAwait(false);
+
+        // }
+        var scaleFactor = 1;
+
+        if (string.IsNullOrEmpty(parentId))
+        {
+            blobDirectoryName = $"{deletePage.DocumentId}/";
+        }
+
+        var blobName = $"{blobDirectoryName}{DbConstants.Page}-{pageIndex}-{scaleFactor}-webp";
+        
+        var prefix = $"{blobDirectoryName}{DbConstants.Page}-{pageIndex}-";
+
+// Now use the updated prefix
+        //  var pageBlobs = container.GetBlobsAsync(prefix: prefix);
+        //  await foreach (var blobItem in pageBlobs)
+        //  {
+        //      await container.DeleteBlobIfExistsAsync(blobItem.Name, cancellationToken: token)
+        //          .ConfigureAwait(false);
+        //  }
+
+        // var page=await container.DeleteIfExistsAsync(pageblob.n).ConfigureAwait(false);
+        
+
+
+        var pageBlobs = container.GetBlobsAsync(prefix: $"{DbConstants.Page}-{pageIndex}-");
+        await foreach (var blobItem in pageBlobs)
+        {
+            await container.DeleteBlobIfExistsAsync(blobItem.Name, cancellationToken: token)
+                .ConfigureAwait(false);
+        }
+
+        // // Delete WebP versions
+        // var webpBlobs = container.GetBlobsAsync(prefix: $"{DbConstants.Page}-{pageIndex}-", traits: BlobTraits.None, states: BlobStates.None, cancellationToken: token);
+        // await foreach (var blobItem in webpBlobs)
+        // {
+        //     if (blobItem.Name.EndsWith("-webp"))
+        //     {
+        //         await container.DeleteBlobIfExistsAsync(blobItem.Name, cancellationToken: token)
+        //             .ConfigureAwait(false);
+        //     }
+        // }
+    }
+    catch (Exception ex)
+    {
+        this.logger.LogError(ex, "Error deleting page caches");
+        throw;
+    }
+}
 }
 
