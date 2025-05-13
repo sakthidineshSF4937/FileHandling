@@ -26,7 +26,7 @@ public async Task UpdatedMergedPDFThumbnail(string childId,DocumentDetails docum
         var pageTask = new Task[pageCount];
         var webpTask = new Task[pageCount];
 
-        for (int i = 1; i <= pageCount; i++)
+        for (int i = 0; i < pageCount; i++)
         {
             SizeF pageSize = pageDetails[i];
             var pagePtr = PdfiumViewer.FPDF_LoadPage(documentPtr, i);
