@@ -1,0 +1,86 @@
+private async Task UploadPdfThumbnails(string documentId,DocumentDetails document,string childId,string organizationId,string parentId,string scannedBlobName,Stream manipulatedDocumentStream,BlobContainerClient cloudBlobContainer,CancellationToken cancellationToken)
+{
+    string thumbnailCloudBlobName = string.IsNullOrEmpty(parentId)
+        ? $"{documentId}-{DbConstants.Thumbnails}"
+        : $"{parentId}-{DbConstants.Thumbnails}";
+
+        var documentProperties = document.DocumentProperties;
+
+    
+    
+    var thumbnailCloudBlobContainer = await this.CloudStorage
+        .GetContainer(thumbnailCloudBlobName, organizationId)
+        .ConfigureAwait(false);
+
+    PdfRenderer renderer = null;
+
+    try
+    {
+        renderer = new PdfRenderer();
+        var pageDetails = renderer.LoadDocument(manipulatedDocumentStream, null, out var documentPtr);
+        var pageCount = pageDetails.Count;
+
+        var pdfViewerLoadObject = new PdfViewerLoadDetails
+        {
+            PageCount = pageCount,
+            PageSizes = pageDetails,
+            DocumentLiveCount = 1,
+        };
+
+        var tasks = new List<Task>();
+        using var semaphore = new SemaphoreSlim(4);
+
+        for (int i = 0; i < pageCount; i++)
+        {
+            int pageIndex = i;
+            await semaphore.WaitAsync(cancellationToken);
+
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var pagePtr = PdfiumViewer.FPDF_LoadPage(documentPtr, pageIndex);
+
+                    var thumbnailContent = PdfExport.ExportPageAsThumbnail(pagePtr);
+                    thumbnailContent.Position = 0;
+
+                    var blobName = $"{scannedBlobName}{childId}{DbConstants.Thumbnail}-{pageIndex}.png";
+                    var thumbnailBlobClient = thumbnailCloudBlobContainer.GetBlobClient(blobName);
+
+                    await thumbnailBlobClient.UploadAsync(thumbnailContent, cancellationToken);
+                    await thumbnailContent.DisposeAsync();
+
+                    PdfiumViewer.FPDF_ClosePage(pagePtr);
+                }
+                catch (Exception ex)
+                {
+                    this.logger.LogError(ex, $"Error processing page {pageIndex}: {ex.Message}");
+                    throw;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }, cancellationToken));
+        }
+
+        await Task.WhenAll(tasks);
+
+        PdfiumViewer.FPDF_CloseDocument(documentPtr);
+    }
+    catch (Exception ex)
+    {
+        this.logger.LogError(ex, ex.Message);
+        throw;
+    }
+    finally
+    {
+        renderer?.Dispose(renderer.PdfDocumentId);
+    }
+}
+
+Need to iterate the documentproperties based on pagecount once the pagecount is less than for loop i value moved to the nest document propeties set the  var thumbnailBlobClient = thumbnailCloudBlobContainer.GetBlobClient($"{Documentproperties.documentid}{DbConstants.Thumbnail}-{i}.png");
+
+  for the firstdocumentproperties var  thumbnailBlobClient = thumbnailCloudBlobContainer.GetBlobClient($"{DbConstants.Thumbnail}-{i}.png"); remaining all other should be var thumbnailBlobClient = thumbnailCloudBlobContainer.GetBlobClient($"{Documentproperties.documentid}{DbConstants.Thumbnail}-{i}.png");
