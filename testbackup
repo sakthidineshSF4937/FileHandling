@@ -1114,3 +1114,195 @@ private async Task DeleteThumbnailBlobs(BlobContainerClient cloudBlobContainer, 
         await Task.WhenAll(deleteTasks).ConfigureAwait(false);
       }
     }
+
+ public async Task<string> Load(Dictionary<string, object> jsonObject, CancellationToken token)
+    {
+      string documentId = string.Empty;
+      string documentLoadDetails = string.Empty;
+      string documentPageDetails = string.Empty;
+      string scannedBlobName = string.Empty;
+      string signerId = string.Empty;
+
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      signerId = this.GetSignerId(jsonObject, this.httpContextAccessor.HttpContext);
+
+      if (string.IsNullOrEmpty(signerId))
+      {
+        throw new InvalidDataException(CommonResource.InvalidSignerId);
+      }
+
+      if (jsonObject.ContainsKey("document"))
+      {
+        documentLoadDetails = jsonObject["document"].ToString();
+      }
+      else if (jsonObject.ContainsKey("documentId") && string.IsNullOrEmpty(documentId))
+      {
+        documentLoadDetails = jsonObject["documentId"].ToString();
+      }
+
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+      scannedBlobName = isPrintSignDocument ? $"{DbConstants.ScannedDocument}/" : scannedBlobName;
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+        documentPageDetails = DbConstants.DocumentDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(documentLoadDetails);
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault().DocumentId : documentId;
+        documentPageDetails = isPrintSignDocument ? DbConstants.DocumentDetails : DbConstants.DocumentMergedDetails;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      BlobContainerClient blobContainer =
+        await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+      if (!await blobContainer.ExistsAsync().ConfigureAwait(false))
+      {
+        throw new InvalidDataException(CommonResource.InvalidDocumentId);
+      }
+
+      var blob = blobContainer.GetBlobClient($"{scannedBlobName}{documentPageDetails}");
+      var documentDetails = await this.CloudStorage.DownloadAsync<PdfViewerLoadDetails>(blob, false).ConfigureAwait(false);
+      documentDetails = this.AddUniqueIDToViewerLoadDetails(documentDetails, jsonObject);
+      documentDetails.SecretId = await this.secretkeyGenerationService.Generate(documentId, signerId).ConfigureAwait(false);
+      return documentDetails.ToNewsoftJson();
+    }
+
+    /// <inheritdoc/>
+    public async Task<byte[]> RenderPdfPages(Dictionary<string, object> jsonObject, BrowserType browserType, CancellationToken token)
+    {
+      if (jsonObject is null)
+      {
+        throw new ArgumentNullException(nameof(jsonObject));
+      }
+
+      int pageNumber = int.Parse(jsonObject["pageNumber"].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture);
+      var intialPageNumber = pageNumber;
+      float scaleFactor = float.Parse(jsonObject["zoomFactor"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture);
+      string documentLoadDetails = jsonObject["documentId"].ToString();
+      string blobDirectoryName = string.Empty;
+      string documentId;
+      string scannedBlobName = string.Empty;
+      bool isPrintSignDocument = jsonObject.ContainsKey("isPrintSignDocument") && bool.Parse(jsonObject["isPrintSignDocument"].ToString());
+
+      if (Guid.TryParse(documentLoadDetails, out _))
+      {
+        documentId = documentLoadDetails;
+      }
+      else
+      {
+        DocumentProperties[] viewerLoadDetails = BinarySerializer.FromJson<DocumentProperties[]>(jsonObject["documentId"].ToString()); // JsonSerializer.Deserialize<DocumentProperties[]>(jsonObject["documentId"].ToString());
+        documentId = viewerLoadDetails.FirstOrDefault(x => !string.IsNullOrEmpty(x.ParentId))?.ParentId;
+        documentId = string.IsNullOrEmpty(documentId) ? viewerLoadDetails.FirstOrDefault()?.DocumentId : documentId;
+        blobDirectoryName = GetBlobDirectoryName(ref pageNumber, viewerLoadDetails);
+      }
+
+      if (isPrintSignDocument)
+      {
+        scannedBlobName = $"{DbConstants.ScannedDocument}/";
+        blobDirectoryName = string.Empty;
+        pageNumber = intialPageNumber;
+      }
+
+      // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+      var organizationId = jsonObject.TryGetValue("organizationId", out var orgId) ? orgId?.ToString() : null;
+      if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+      {
+        var documentDetailsCache = await this.GetDocumentDetailsCache(documentId, this.httpContextAccessor.HttpContext)
+          .ConfigureAwait(false);
+        organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+      }
+
+      var blobContainer = await this.CloudStorage.GetContainer(documentId, organizationId).ConfigureAwait(false);
+
+      var blobName = $"{scannedBlobName}{blobDirectoryName}{DbConstants.Page}-{pageNumber}-{scaleFactor}";
+      var webpBlobName = browserType switch
+      {
+        BrowserType.Chrome or BrowserType.Firefox or BrowserType.Edge => $"{blobName}-webp",
+        _ => blobName
+      };
+
+      var blob = blobContainer.GetBlobClient(webpBlobName);
+      PdfViewerImage imageDetails = null;
+      if (await blob.ExistsAsync(token).ConfigureAwait(false))
+      {
+        await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+        imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+      }
+      else
+      {
+        blob = blobContainer.GetBlobClient(blobName);
+        if (await blob.ExistsAsync(token).ConfigureAwait(false))
+        {
+          await using var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+          imageDetails = await BinarySerializer.DeserializeAsync<PdfViewerImage>(stream).ConfigureAwait(false);
+        }
+      }
+
+      if (imageDetails == null)
+      {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+        imageDetails = await this.ExtractImageFromDocument(pageNumber, scaleFactor, blobDirectoryName, blobContainer, blob/*, token*/).ConfigureAwait(false);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+      }
+
+      return BinarySerializer.Serialize(this.AddUniqueIdToRenderImageDetails(imageDetails, intialPageNumber, jsonObject, scaleFactor));
+    }   public async Task<IActionResult> RenderThumbnail(ThumbnailDetails thumbnailDetails, CancellationToken token)
+    {
+    if (thumbnailDetails is null)
+    {
+        throw new ArgumentNullException(nameof(thumbnailDetails));
+    }
+
+    int pageNumber = thumbnailDetails.CurrentPageNumber;
+    string documentId = thumbnailDetails.DocumentId;
+    string parentId = thumbnailDetails.ParentDocumentId;
+    string baseContainerName = string.IsNullOrEmpty(parentId)
+      ? $"{documentId}-{DbConstants.Thumbnails}"
+      : $"{parentId}-{DbConstants.Thumbnails}";
+
+    // Check whether the organization id is null or empty, and also it is guid, if not take from document details cache.
+    var organizationId = thumbnailDetails.OrganizationId;
+    if (string.IsNullOrEmpty(organizationId) || !Guid.TryParse(organizationId, out _))
+    {
+      var docId = string.IsNullOrEmpty(parentId) ? documentId : parentId;
+      var documentDetailsCache = await this.GetDocumentDetailsCache(docId, this.httpContextAccessor.HttpContext)
+        .ConfigureAwait(false);
+      organizationId = documentDetailsCache?.OrganizationId ?? this.userDataService?.OrganizationId;
+    }
+
+    BlobContainerClient blobContainer =
+      await this.CloudStorage.GetContainer(baseContainerName, organizationId).ConfigureAwait(false);
+
+    string blobPath = string.IsNullOrEmpty(parentId)
+      ? $"{DbConstants.Thumbnail}-{pageNumber}.png"
+      : $"{documentId}/{DbConstants.Thumbnail}-{pageNumber}.png";
+
+    var blob = blobContainer.GetBlobClient(blobPath);
+
+    if (await blob.ExistsAsync().ConfigureAwait(false))
+    {
+      var stream = await blob.OpenReadAsync(cancellationToken: token).ConfigureAwait(false);
+      return new FileStreamResult(stream, "image/png")
+      {
+        FileDownloadName = blobPath,
+      };
+    }
+
+    return null;
+    }
