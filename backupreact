@@ -1,0 +1,3026 @@
+import BoldSignShareDialog from '@boldsign/bold-sign-sidebar/src/components/user-component.vue';
+import { closest, select, removeClass, addClass, selectAll, isNullOrUndefined } from '@syncfusion/ej2-base';
+import { DataManager, Query, UrlAdaptor } from '@syncfusion/ej2-data';
+import { saveAs } from "file-saver";
+import { CheckBoxSelection, MultiSelectComponent, MultiSelectPlugin } from '@syncfusion/ej2-vue-dropdowns';
+import {
+  CheckBoxChangeEventArgs,
+  Filter,
+  ForeignKey,
+  GridComponent,
+  Page,
+  RowSelectingEventArgs,
+  Search,
+  SearchSettingsModel, SelectionSettingsModel,
+  Sort,
+} from '@syncfusion/ej2-vue-grids';
+import {
+  ClickEventArgs as NavigateClickEvent,
+  ContextMenuComponent,
+  MenuEventArgs,
+} from '@syncfusion/ej2-vue-navigations';
+import { ToastComponent } from '@syncfusion/ej2-vue-notifications';
+import { DialogComponent, DialogPlugin } from '@syncfusion/ej2-vue-popups';
+import { Component, Vue, Watch } from 'nuxt-property-decorator';
+import pagerTemp1 from '../../components/common/pager-temp.vue';
+import itemVue from '../../components/item-temp.vue';
+import dateTemplateVue from '../../components/templates/date-temp.vue';
+import rolesTemplateVue from '../../components/templates/roles-template.vue';
+import tagsTemplateVue from '../../components/templates/tags-template.vue';
+import columntempVue from '../../components/templates/templates-command-column.vue';
+import {
+  AnalyticsAction,
+  UserInsight,
+  UserInsightAction,
+  UserInsightOrigin,
+  UserInsightPage, UserInsightSubPage,
+} from '../../models/userInsight';
+import {
+  getCookie,
+  closeTooltips,
+  copyToClipboard,
+  isArray,
+  getDateRangePresetName,
+  DateRangeCustom,
+  getParamsName,
+  isSameRoute,
+  highlightSearch,
+  getDateRangePresetDisplayName,
+  ThisWeekRange,
+  LastWeekRange,
+  ThisYearRange,
+  LastYearRange,
+  ThisMonthRange,
+  LastMonthRange,
+  TodayRange,
+  YesterdayRange,
+  getDateRangePreset,
+  formatDateWithoutTime, isNullOrEmptyString
+} from '../../utils';
+import { getParams, isStatusMatch, replacePageQuery, loginPageRedirection } from '../../utils/common';
+import { EJ2Intance } from '../../utils/interface';
+import CustomDialog from '../../components/common/custom-modal.vue';
+import TemplateShare from '../../components/templates/template-share.vue';
+import { CLOSE_TOOLTIP_ON_SCROLL, DOCUMENTS_CLEAR_FILTER, IAccessRights, RELOAD_TEMPLATES } from '../../models';
+import AddManageTag from "~/components/summary/add-manage-tag.vue";
+import { DateRangePickerComponent } from "@syncfusion/ej2-vue-calendars";
+import moment from "moment";
+import doc = Mocha.reporters.doc;
+import MergeTemplateDropDown from "~/components/templates/MergeTemplateDropDown.vue";
+import CloneTemplateDialog from '../../components/templates/clone-template-dialog.vue'
+
+Vue.use(DialogPlugin);
+Vue.use(MultiSelectPlugin);
+
+let lastAccessType: string = 'use';
+let isInitialSelection = true;
+let isCleared: boolean = false;
+
+@Component({
+  methods: { isNullOrEmptyString },
+  components: {
+    AddManageTag,
+    'boldsign-share-dialog': BoldSignShareDialog,
+    'template-share-dialog': TemplateShare,
+    CustomDialog,
+    CloneTemplateDialog,
+  },
+  provide: {
+    grid: [ForeignKey, Filter, Search, Sort, Page],
+    multiselect: [CheckBoxSelection],
+  },
+})
+export default class TemplateComponent extends Vue {
+    mergeOptionsTemplate = function () {
+      return {
+        template: MergeTemplateDropDown
+      };
+    }
+
+    pagerTemp = function () {
+      return { template: pagerTemp1 };
+    };
+
+    menuTemplate = function () {
+      return { template: columntempVue };
+    };
+
+    dateTemplate = function () {
+      return { template: dateTemplateVue };
+    };
+
+    iTemplate = function () {
+      return {
+        template: itemVue,
+      };
+    };
+
+    rolesTemplate = function () {
+      return {
+        template: rolesTemplateVue,
+      };
+    };
+
+    tagsTemplate = function () {
+      return {
+        template: tagsTemplateVue,
+      };
+    };
+
+    private gridRefreshDebounce: any = null;
+    menuItems = [
+      {
+        text: 'Use template',
+        iconCss: 'e-icons e-signaturemarker',
+        id: 'template-menu-use',
+      },
+      {
+        text: 'Create bulk link',
+        iconCss: 'e-icons e-linkforms',
+        id: 'template-menu-create-link',
+      },
+      {
+        text: 'Bulk send',
+        iconCss: 'e-icons bs-bulk-send',
+        id: 'template-menu-bulk-send',
+      },
+      {
+        id: 'mergeoptionsseperator',
+        separator: true,
+      },
+      {
+        text: 'Edit template',
+        iconCss: 'e-icons bs-template-edit',
+        id: 'template-menu-edit',
+      },
+      {
+        text: 'Add tags',
+        iconCss: 'e-icons bs_doc_tag',
+        id: 'template-menu-add-tags'
+      },
+      {
+        text: 'Manage tags',
+        iconCss: 'e-icons bs_doc_tag',
+        id: 'template-menu-manage-tags'
+      },
+      {
+        text: 'Copy template ID',
+        iconCss: 'e-icons bs-template-copyid',
+        id: 'template-menu-copy',
+      },
+      {
+        text: 'Clone template',
+        iconCss: 'e-icons bs_doc_clone',
+        id: 'template-menu-clone',
+      },
+      {
+        text: 'Share',
+        iconCss: 'e-icons bs-share',
+        id: 'template-menu-share',
+      },
+      {
+        text: 'Export',
+        iconCss: 'e-icons bs-template-export-template',
+        id: 'template-menu-export'
+      },
+      {
+        text: 'Download document',
+        iconCss: 'e-icons bs-template-download',
+        id: 'template-menu-download',
+      },
+      {
+        id: 'deleteseperator',
+        separator: true,
+      },
+      {
+        text: 'Delete',
+        iconCss: 'e-icons bs-template-delete',
+        id: 'template-menu-delete',
+      },
+    ];
+
+    column1 = {
+      header: 'People',
+      field: 'name',
+      imageField: 'imageSrc',
+    };
+
+    column2 = {
+      header: 'AccessType',
+      field: 'accessType',
+      dataSource: [
+        { text: 'Can use', value: 'Use' },
+        { text: 'Can edit', value: 'Edit' },
+      ],
+      dataSourceFields: { text: 'text', value: 'value' },
+    };
+
+    close = (args: any): void => {};
+    deleteContent = this.$nuxt.$t('templates.confirmPermanentDelete');
+    deleteDialogButtons = [
+      { click: this.deleteNoBtn, buttonModel: { content: 'Cancel' } },
+      {
+        click: this.deleteYesBtn,
+        buttonModel: { content: 'Yes, delete', cssClass: 'e-danger' },
+      },
+    ];
+
+    dialogButtons = [
+      {
+        buttonModel: {
+          cssClass: 'bs_filterreset',
+          content: this.$nuxt.$t('documents.reset'),
+        },
+        click: this.filterResetClick.bind(this),
+      },
+      {
+        buttonModel: {
+          isPrimary: true,
+          cssClass: 'bs_filter_btn bs_clear_filter',
+          content: this.$nuxt.$t('documents.applyFilter'),
+          disabled: true,
+        },
+        click: this.filterDialogClick.bind(this),
+      },
+    ];
+
+    deleteDialogVisible = false;
+    deleteDialogTarget = document.body;
+    gridSortOptions = { columns: [{ field: 'activityDate', direction: 'Descending' }], allowUnsort: false };
+    isAllChecked = true;
+    isShareChecked = false;
+    isCreateChecked = false;
+    templateIds = [];
+    isToolbar = true;
+    isShare = false;
+    isDelete = false;
+    isMerge = false;
+    isDownload = false;
+    toastPosition = { X: 'Center', Y: 'Bottom' };
+    toastTarget = document.body;
+    data = null;
+    shareNoRecordsTemplate = this.$nuxt.$t('documents.shareNoRecordsTemplate');
+    multiSelectData = null;
+    uId = '';
+    multiSelectFields = { text: 'first_name', value: 'first_name' };
+    pageSettings = { pageSize: 20, currentPage: 1 };
+    gridQuery = new Query();
+    checkState = true;
+    selectionOptions: SelectionSettingsModel = isStatusMatch(this.$nuxt.$route, ['drafts']) ? { enableToggle: true } : { enableToggle: true, type: 'Multiple', persistSelection: true };
+    headermessage = '';
+    showUserComponent = false;
+    showProgress = false;
+    peopleData = [];
+    disableShareAction = true;
+    showHeaderAddInfo = true;
+    showFooterAddInfo = true;
+    isSelfCreated = false;
+    isGridMultipleItemsSelected = false;
+    isStatusMatch = isStatusMatch;
+    selectedDocumentsCount = 0;
+    isSearch = false;
+    searchText = '';
+    searchSettings = (null as unknown) as SearchSettingsModel;
+    availableGroups = null;
+    templateSharedDetails = null;
+    selectedTemplate = null;
+    labels = [];
+    clickabletags = [];
+    isFilter = false;
+    isTagsFilter = false;
+    dialogTarget = '#template_doc'
+    closeOnEscape = true;
+    isResetPage = false;
+    isApplyFilter = false;
+    isLabelsFilterValue = false;
+    isTagsFilterValue = false;
+    isFilterLabels = false;
+    visible = false;
+    width = '570px';
+    private labelRefreshDebounce: any = null;
+    labelDataSource = [];
+    labelPopupElement: any;
+    labelFilterInputEl: any;
+    isFilterTags = false;
+    isLabelsEmpty = false;
+    isClearFilter = false;
+    creatorDataSource = [];
+    updatedCreatorDatasource: any[] = [];
+    isCreatedByFilterValue = false;
+    creatorPopupElement: any;
+    creatorFilterInputEl: any;
+    isCreatedByEmpty = false;
+    isFilterCreator = false;
+    dateRangeWidth = '320px';
+    isDateRangeFilterValue = false;
+    selectedDateRangePreset = '';
+    isFilterCreatedBetween = false;
+    pinFilterDialogHeader = this.$nuxt.$t('documents.pinDialogHeader');
+    pinFilterPlaceholder = this.$nuxt.$t('templates.pinFilterPlaceholder');
+    pinFilterToolTipContent = this.$nuxt.$t('templates.pinFilterTooltip');
+    animationSettings = { effect: 'None' };
+    pinFilterDlgVisible = false;
+    pinFilterName = '';
+    pinFilterId = '';
+    pinFilterDlgBtn = [
+      {
+        buttonModel: { content: this.$nuxt.$t('documents.cancel'), cssClass: 'e-flat' },
+        click: this.closePinFilterDlg.bind(this),
+      },
+      {
+        buttonModel: { content: this.$nuxt.$t('documents.savePin'), cssClass: 'e-flat', isPrimary: true },
+        click: this.savePinFilter.bind(this),
+      },
+    ];
+
+    confirmDialogTarget = document.body;
+    pinFilterDialogTitleDescription = this.$nuxt.$t('templates.pinFilterDialogTitleDescription');
+    isEmptyPinFilterName = false;
+    cloneTemplateId: any = '';
+
+    moment = moment;
+
+    dateRangeCustomDisplay: HTMLElement = null;
+
+    thisWeekStartDate = ThisWeekRange.start;
+    thisWeekEndDate = ThisWeekRange.end;
+
+    lastWeekStartDate: Date = LastWeekRange.start;
+    lastWeekEndDate: Date = LastWeekRange.end;
+
+    thisYearStartDate: Date = ThisYearRange.start;
+    thisYearEndDate: Date = ThisYearRange.end;
+
+    lastYearStartDate: Date = LastYearRange.start;
+    lastYearEndDate: Date = LastYearRange.end;
+
+    thisMonthStartDate: Date = ThisMonthRange.start;
+    thisMonthEndDate: Date = ThisMonthRange.end;
+
+    lastMonthStartDate: Date = LastMonthRange.start;
+    lastMonthEndDate: Date = LastMonthRange.end;
+
+    todayStartDate = TodayRange.start;
+    todayEndDate = TodayRange.end;
+
+    yesterdayStartDate: Date = YesterdayRange.start;
+    yesterdayEndDate: Date = YesterdayRange.end;
+
+    creatorDropDownFields = {
+      text: 'createdBy',
+      value: 'creatorEmail',
+    };
+
+    menuIcons: NodeList;
+    get pageTitle () {
+      if (isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+        return 'Draft Templates';
+      } else if (isStatusMatch(this.$nuxt.$route, ['mytemplates'])) {
+        return 'My Templates';
+      } else if (isStatusMatch(this.$nuxt.$route, ['sharedtemplate'])) {
+        return 'Shared Templates';
+      } else {
+        return 'All Templates';
+      }
+    }
+
+    metaInfo () {
+      return {
+        title: this.pageTitle,
+        titleTemplate: '%s - BoldSign',
+      };
+    }
+
+    constructor () {
+      super();
+      const gridData = new DataManager({
+        url: '/Template/GetTemplates',
+        adaptor: new UrlAdaptor(),
+        // enableCaching: true,
+        crossDomain: true,
+        headers: [
+          {
+            'X-XSRF-TOKEN': this.$store.state.xsrfToken
+          },
+          {
+            "X-Requested-App": "BoldSign",
+          },
+        ],
+      });
+      this.multiSelectData = [];
+      this.data = gridData;
+    }
+
+    $refs!: {
+        grid1: GridComponent;
+        toastRef: ToastComponent;
+        contextMenu: ContextMenuComponent;
+        loadingElement: HTMLDivElement;
+        filterLoadingElement: HTMLDivElement;
+        bsAddManageTag: DialogComponent;
+        labelsDropdown: MultiSelectComponent;
+        creatorDropdown: MultiSelectComponent;
+        Dialog: DialogComponent;
+        dateRangeCreated: DateRangePickerComponent;
+        cloneTemplateConfirmDialog: any;
+    };
+
+    get canShowToolbar (): boolean {
+      if (!isStatusMatch(this.$nuxt.$route, ['drafts']) && !this.checkState) {
+        return true;
+      }
+
+      if (isStatusMatch(this.$nuxt.$route, ['drafts']) && this.selectedDocumentsCount > 1) {
+        return true;
+      }
+
+      return false;
+    }
+
+    isQueryValue (name) {
+      return !this.isEmptyObject(this.$nuxt.$route.query) && !isNullOrUndefined(this.$nuxt.$route.query[name]);
+    }
+
+    get isTags () {
+      return !isNullOrUndefined((this.$nuxt.$route.query.clickabletags as any));
+    }
+
+    get selectedClickableLabels () {
+      return (this.$nuxt.$route.query.clickabletags as any).split(',');
+    }
+
+    get isLabels () {
+      return !isNullOrUndefined((this.$nuxt.$route.query.labels as any));
+    }
+
+    get selectedLabels () {
+      return (this.$nuxt.$route.query.labels as any).split(',');
+    }
+
+    openConfirmDeleteDialog () {
+      this.$data.deleteDialogVisible = true;
+    }
+
+    handleScroll () {
+      if (this.$refs.contextMenu) {
+        this.$refs.contextMenu.close();
+      }
+      if (this.checkState) {
+        this.$nuxt.$emit('documentClearSelection');
+      }
+      this.$nuxt.$emit(CLOSE_TOOLTIP_ON_SCROLL);
+      closeTooltips();
+    }
+
+    subscribeEvents () {
+      this.$nuxt.$on('templateDeleteItemClick', this.openConfirmDeleteDialog);
+      this.$nuxt.$on('documentClearSelection', this.gridClearSelection);
+      this.$nuxt.$on('templateSearch', this.DocumentSearch);
+      this.$nuxt.$on(RELOAD_TEMPLATES, this.DocumentSearch);
+      this.$nuxt.$on('newNotificationReceived', this.onNewNotificationReceived);
+      this.$nuxt.$on('scheduleGridRefresh', this.scheduleGridRefresh);
+      this.$nuxt.$on('selectedTags', this.selectedTags);
+      this.$nuxt.$on('refreshTemplatePage', this.gridClearFiltering);
+      this.$nuxt.$on('mergeTemplate', this.mergeTemplate);
+    }
+
+    unSubscribeEvents () {
+      this.$nuxt.$off('templateDeleteItemClick');
+      this.$nuxt.$off('documentClearSelection');
+      this.$nuxt.$off('templateSearch', this.DocumentSearch);
+      this.$nuxt.$off(RELOAD_TEMPLATES, this.DocumentSearch);
+      this.$nuxt.$off('newNotificationReceived', this.onNewNotificationReceived);
+      this.$nuxt.$off('scheduleGridRefresh', this.scheduleGridRefresh);
+      this.$nuxt.$off('selectedTags', this.selectedTags);
+      this.$nuxt.$off('refreshTemplatePage', this.gridClearFiltering);
+      this.$nuxt.$off('mergeTemplate');
+    }
+
+    beforeMount () {
+      if (this.isQueryValue('isAdvancedFilter')) {
+        this.isFilter = this.$route.query.isAdvancedFilter === 'true';
+        this.$nuxt.$store.commit('SET_FILTER', this.isFilter);
+      }
+
+      if (this.isQueryValue('labels')) {
+        this.$store.commit('setLabelFilterValue', this.fetchQueryStringValue('labels'));
+      }
+
+      if (this.isQueryValue('clickabletags')) {
+        this.isFilter = this.isTagsFilter = true;
+        this.$nuxt.$store.commit('SET_FILTER', this.isFilter);
+        this.$nuxt.$store.commit('SET_TAGSFILTER', this.isTagsFilter);
+        this.$store.commit('setSelectedLabel', this.fetchQueryStringValue('clickabletags'));
+      }
+
+      if (this.isQueryValue('createdBy')) {
+        this.$store.commit('setCreatedByFilterValue', this.fetchQueryStringValue('createdBy'));
+      }
+
+      if (this.isQueryValue('dateRange') || this.isQueryValue('dateRangeType')) {
+        const dateRangeVal = this.getDateRangeValueFromQuery();
+        this.selectedDateRangePreset = this.$route.query.dateRangeType as string;
+        const val: any = [];
+        val.push(dateRangeVal.startDate, dateRangeVal.endDate);
+        this.$store.commit('setDateRangeFilterValue', val);
+      }
+
+      if (this.isQueryValue('filterId') && this.isQueryValue('filterName')) {
+        this.pinFilterId = this.$nuxt.$route.query.filterId.toString();
+        this.pinFilterName = this.$nuxt.$route.query.filterName.toString();
+        delete this.$nuxt.$route.query.filterId;
+        delete this.$nuxt.$route.query.filterName;
+      }
+      if (this.isQueryValue('searchText')) {
+        this.isSearch = true;
+        this.$nuxt.$store.commit('template/SET_UPDATEDSEARCHTEXT', this.fetchQueryStringValue('searchText'));
+        this.$nuxt.$store.commit('template/setSearchText', this.fetchQueryStringValue('searchText'));
+      }
+
+      this.gridQuery = new Query()
+        .addParams('ID', getParams(this.$route))
+        .addParams('Labels', this.fetchQueryStringValue('labels'))
+        .addParams('ClickableLabels', this.fetchQueryStringValue('clickabletags'))
+        .addParams('CreatedBy', this.fetchQueryStringValue('createdBy'))
+        .addParams('SearchKey', this.$nuxt.$store.state.template.searchText);
+      this.pageSettings.currentPage = parseInt(this.fetchQueryStringValue('page'));
+      const dateRangeVal = this.getDateRangeValueFromQuery();
+      this.selectedDateRangePreset = this.$route.query.dateRangeType as string;
+      if (dateRangeVal) {
+        this.gridQuery.addParams('StartDate', dateRangeVal.startDate);
+        this.gridQuery.addParams('EndDate', this.getEndDate(dateRangeVal.endDate));
+        this.gridQuery.addParams('dateRangeType', this.selectedDateRangePreset);
+      }
+    }
+
+    mounted () {
+      closeTooltips();
+      let labelDropdown, tagsClick, creatorDropdown, startDate, endDate;
+      if (
+        this.isQueryValue('labels') ||
+        this.isQueryValue('clickabletags') ||
+        this.isQueryValue('createdBy') ||
+        this.isQueryValue('dateRange') ||
+        this.isQueryValue('dateRangeType')
+      ) {
+        if (this.isQueryValue('labels')) {
+          this.$refs.labelsDropdown.ej2Instances.value = this.fetchQueryStringValue('labels');
+          labelDropdown = this.fetchQueryStringValue('labels');
+          this.isFilterLabels = true;
+        }
+        if (this.isQueryValue('clickabletags')) {
+          tagsClick = this.fetchQueryStringValue('clickabletags');
+          this.isFilterTags = true;
+        }
+        if (this.isQueryValue('createdBy')) {
+          this.$refs.creatorDropdown.ej2Instances.value = this.fetchQueryStringValue('createdBy');
+          creatorDropdown = this.fetchQueryStringValue('createdBy');
+          this.isFilterCreator = true;
+        }
+
+        if (this.isQueryValue('dateRange') || this.isQueryValue('dateRangeType')) {
+          const dateRangeVal = this.getDateRangeValueFromQuery();
+          this.selectedDateRangePreset = this.$route.query.dateRangeType as string;
+
+          const val: any = [];
+          val.push(dateRangeVal.startDate, dateRangeVal.endDate);
+          this.$refs.dateRangeCreated.ej2Instances.startDate = dateRangeVal.startDate;
+          this.$refs.dateRangeCreated.ej2Instances.endDate = dateRangeVal.endDate;
+          this.$refs.dateRangeCreated.ej2Instances.value = val;
+          this.$refs.dateRangeCreated.ej2Instances.dataBind();
+          startDate = val[0].toISOString();
+          endDate = val[1].toISOString();
+          this.isFilterCreatedBetween = true;
+          this.setDateRangeCustomDisplayText(val);
+        }
+      }
+    }
+
+    created () {
+      this.subscribeEvents();
+      this.$nuxt.$store.commit('SET_HEADER_TEMPLATE', { isTemplate: true });
+    }
+
+    beforeRouteUpdate (to, from, next) {
+      if (Object.keys(to.query).length <= 0) {
+        const docGrid = this.$refs.grid1.ej2Instances;
+        docGrid.query.params = [];
+        docGrid.query.addParams('ID', getParams(this.$route));
+        docGrid.query.addParams('CreatedBy', ['all']);
+        docGrid.query.addParams('StartDate', null);
+        docGrid.query.addParams('EndDate', null);
+        docGrid.query.addParams('dateRangeType', '');
+        docGrid.query.addParams('Labels', []);
+        docGrid.query.addParams('ClickableLabels', []);
+        docGrid.query.addParams('SearchKey', '');
+      }
+      next();
+    }
+
+    destroyed () {
+      (this.$el as any).style.display = 'none';
+    }
+
+    beforeDestroy () {
+      closeTooltips();
+      this.$refs.creatorDropdown ? this.$refs.creatorDropdown.$destroy() : '';
+      this.$nuxt.$store.commit('SET_HEADER_TEMPLATE', {});
+      this.$nuxt.$store.commit('template/setTemplateDetails', []);
+      this.$nuxt.$store.commit('setPageInfo', '');
+      this.$nuxt.$store.commit('template/setSearchText', '');
+      this.$nuxt.$store.commit('template/SET_UPDATEDSEARCHTEXT', '');
+      this.$nuxt.$store.commit('template/setIsMultipleTemplateSelected', false);
+      this.$nuxt.$store.commit('SET_FILTER', false);
+      this.$nuxt.$store.commit('setCreatedByFilterValue', []);
+      this.$nuxt.$store.commit('setLabelFilterValue', []);
+      this.$nuxt.$store.commit('setSelectedLabel', []);
+      this.$nuxt.$store.commit('setDateRangeFilterValue', []);
+      this.unSubscribeEvents();
+    }
+
+    @Watch('isSearch')
+    isSearchWatcher (newVal: boolean, oldVal: boolean) {
+      this.$nuxt.$store.commit('template/setIsSearchMode', newVal);
+    }
+
+    @Watch('isFilter')
+    isAdvanceFilterWatcher (newVal: boolean, oldVal: boolean) {
+      this.$nuxt.$store.commit('setIsAdvanceMode', newVal);
+    }
+
+    fetchQueryStringValue (queryName) {
+      let val: any = this.getDefaultValues(queryName);
+      if (
+        !this.isEmptyObject(this.$nuxt.$route.query) &&
+            !isNullOrUndefined(this.$nuxt.$route.query[queryName])
+      ) {
+        val = (this.$nuxt.$route.query[queryName] as any).split(',');
+        if (queryName === 'searchText') {
+          val = this.$nuxt.$route.query[queryName];
+        }
+        if (queryName === 'dateRange') {
+          val.startDate = new Date(val[0]);
+          val.endDate = new Date(val[1]);
+        }
+      }
+      return val;
+    }
+
+    isEmptyObject (value) {
+      return Object.keys(value).length === 0 && value.constructor === Object;
+    }
+
+    deleteYesBtn () {
+      this.$nuxt.$spinner.show(true);
+      const gridObj = this.$refs.grid1.ej2Instances;
+      const toastObj = this.$nuxt.$store.state.toastObj;
+      const selectedRecords: any[] = gridObj.getSelectedRecords();
+
+      if (!selectedRecords.length) {
+        this.$nuxt.$spinner.show(false);
+        return;
+      }
+
+      const documentName = selectedRecords[0].messageTitle;
+      const successContent = this.$nuxt.$t('toast.deleteTempPermanentSuccessToastTittle', {
+        documentName: documentName,
+      });
+      const failureContent = this.$nuxt.$t('toast.deleteTempPermanentFailureToastTittle', {
+        documentName: documentName,
+      });
+
+      const ids: string[] = selectedRecords.map(item => item.documentId);
+      this.onNewNotificationReceived();
+      this.$data.deleteDialogVisible = false;
+
+      // Handle draft template deletion separately
+      if (isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+        this.$api.template
+          .deleteDraftTemplate(ids)
+          .then(() => {
+            this.selectedDocumentsCount = 0;
+            this.checkState = false;
+            this.hideSelectedItems(selectedRecords);
+            this.scheduleGridRefresh();
+            this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+          })
+          .catch(() => {
+            this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+          })
+          .finally(() => {
+            this.$nuxt.$spinner.show(false);
+          });
+      } else {
+        if (selectedRecords.length === 1) {
+          this.$api.template
+            .deleteTemplate(ids[0])
+            .then(() => {
+              this.selectedDocumentsCount = 0;
+              this.checkState = false;
+              this.hideSelectedItems(selectedRecords);
+              this.scheduleGridRefresh();
+              this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            })
+            .catch(() => {
+              this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            })
+            .finally(() => {
+              this.$nuxt.$spinner.show(false);
+            });
+        } else {
+          this.$api.template.mergeDeleteTemplate(ids)
+            .then(() => {
+              this.selectedDocumentsCount = 0;
+              this.checkState = false;
+              this.hideSelectedItems(selectedRecords);
+              this.scheduleGridRefresh();
+              this.$nuxt.$toastService.show(successContent, 'bs_toast_success', 'bs_delete_toast');
+            })
+            .catch(() => {
+              this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            })
+            .finally(() => {
+              this.$nuxt.$spinner.show(false);
+            });
+        }
+      }
+
+      this.isToolbar = false;
+    }
+
+    deleteNoBtn () {
+      this.clearSelection();
+      this.$data.deleteDialogVisible = false;
+    }
+
+    hideSelectedItems (selectedRecords) {
+      if (!selectedRecords) {
+        return;
+      }
+      const gridData = this.$refs.grid1.getCurrentViewRecords() as any;
+      const gridRows = this.$refs.grid1.getRows();
+      const rowElements = selectedRecords.map(x => gridData.findIndex(y => y.documentId === x.documentId)).map(x => gridRows[x]);
+      rowElements.forEach((x: HTMLElement) => (x ? (x.style.display = 'none') : null));
+    }
+
+    getGridHeaderText () {
+      return isStatusMatch(this.$nuxt.$route, ['drafts'])
+        ? this.$t('documents.lastActivity')
+        : this.$t('documents.lastModified');
+    }
+
+    getSearchPlaceholder () {
+      return isStatusMatch(this.$nuxt.$route, ['all'])
+        ? this.$t('documents.searchAllTemplates')
+        : isStatusMatch(this.$nuxt.$route, ['drafts'])
+          ? this.$t('documents.searchAllDrafts')
+          : this.$t('documents.searchTemplates');
+    }
+
+    updateUserComponentVisibility (showUserComponent: boolean) {
+      this.showUserComponent = showUserComponent;
+      this.$nuxt.$store.commit('template/setTemplateDetails', []);
+    }
+
+    addUser (selectedItems: { [key: string]: object }[]) {
+      const $this = this as any;
+      let isNewRecordAdded: boolean = false;
+      for (const item of selectedItems) {
+        const peopleData = this.peopleData;
+        const isExist = peopleData.find((data1: any): any => {
+          return data1.accessUid === item.user_id;
+        });
+        if (!isExist) {
+          isNewRecordAdded = true;
+          peopleData.push({
+            accessUid: item.user_id,
+            imageSrc: item.profileImage,
+            name: item.first_name,
+            accessType: 'Use',
+            isAdded: false,
+            oldAccessType: 'Use',
+            templateName: this.$refs.grid1.ej2Instances.getSelectedRecords()[0].templateName,
+            email: item.email,
+          });
+        }
+      }
+      if (isNewRecordAdded) {
+        if (this.peopleData.length > 0) {
+          this.disableShareAction = false;
+        }
+        $this.$refs.userComponentObj.updateRoleCount();
+      }
+    }
+
+    removeUser (removedData: any) {
+      const $this = this as any;
+      const docGrid = this.$refs.grid1.ej2Instances;
+      const removeTempDetails = this.$nuxt.$store.state.template.templateDetails;
+      const item: { [key: string]: object } = removedData.removedItem as {
+            [key: string]: object;
+        };
+      removeTempDetails.push({
+        accessUid: item.accessUid,
+        isDeleted: true,
+        email: item.email,
+        templateName: item.templateName,
+      });
+      $this.$nuxt.$store.commit('template/setTemplateDetails', removeTempDetails);
+      this.peopleData.splice(removedData.removedItemIndex, 1);
+      if (this.peopleData.length === 0) {
+        if (this.peopleData.length === removeTempDetails.length) {
+          this.disableShareAction = true;
+        } else {
+          this.disableShareAction = false;
+        }
+      }
+      $this.$refs.userComponentObj.updateRoleCount();
+      this.updateConfirmButtonVisibility();
+    }
+
+    updateConfirmButtonVisibility () {
+      for (const people of this.peopleData) {
+        if (!people.isAdded || people.oldAccessType !== people.accessType || !people.isDeleted) {
+          this.disableShareAction = false;
+          break;
+        } else {
+          this.disableShareAction = true;
+        }
+      }
+    }
+
+    roleChange (args: any) {
+      const $this = this as any;
+      const index = Number(args.element.id.replace('ddlAccessType_', ''));
+      this.peopleData[index].accessType = lastAccessType = args.value;
+      $this.$refs.userComponentObj.updateRoleCount();
+      this.updateConfirmButtonVisibility();
+    }
+
+    templateTracker (AnalyticsAction: AnalyticsAction, action: UserInsightAction, isAdvanceFilter?: boolean) {
+      const userInsight = new UserInsight({
+        Action: action,
+        Page: this.$nuxt.$userInsight.getPage(),
+      } as any);
+
+      if (this.isSearch) {
+        userInsight.SubPage = this.$nuxt.$userInsight.getTemplateSubPage();
+      }
+
+      if (this.isFilter) {
+        userInsight.SubPage = UserInsightSubPage.AdvanceFilterTemplatePage;
+      }
+      if (!isAdvanceFilter) {
+        this.$userInsight.menuSelectTracker(AnalyticsAction, action, false, this.isSearch, this.isFilter);
+      } else if (isAdvanceFilter) {
+        userInsight.Origin = UserInsightOrigin.AdvanceFilter;
+        this.$nuxt.$userInsight.track(AnalyticsAction, userInsight);
+      }
+    }
+
+    DocumentSearch (args: any) {
+      let query: any = this.getQueryStrings();
+      query = this.formQueries(query, { searchText: this.$nuxt.$store.state.template.updatedSearchText.trim() });
+      if (
+        (!isSameRoute(this.$nuxt, this.$nuxt.$route.path, query) &&
+          this.$nuxt.$store.state.template.updatedSearchText.trim() !== this.$nuxt.$store.state.template.searchText.trim()) ||
+        (!isNullOrUndefined(args) && args.type === 'clear')
+      ) {
+        this.$nuxt.$store.commit(
+          'template/setSearchText',
+          this.$nuxt.$store.state.template.updatedSearchText.trim(),
+        );
+        this.isSearch = this.$nuxt.$store.state.template.updatedSearchText !== '';
+        this.$nuxt.$spinner.show(true);
+        if (this.$nuxt.$store.state.template.searchText === '') {
+          this.filterOperation();
+          this.$data.isSearch = false;
+        } else {
+          this.filterOperation();
+          this.$data.isSearch = true;
+          this.$nuxt.$userInsight.track(
+            AnalyticsAction.TemplateSearch,
+            new UserInsight({
+              Page: this.$nuxt.$userInsight.getPage(),
+              SubPage: this.$nuxt.$userInsight.getTemplateSubPage(),
+              Action: UserInsightAction.SearchTemplateAction,
+              Origin: UserInsightOrigin.SearchBar,
+            }),
+          );
+        }
+        this.scheduleGridRefresh();
+      }
+    }
+
+    templateSearchSettings () {
+      this.searchSettings = {
+        fields: ['templateName', 'documentId', 'templateLabels'],
+        ignoreCase: true,
+        operator: 'contains',
+        key: this.$nuxt.$store.state.template.updatedSearchText || '',
+      };
+    }
+
+    moveBtnClick (args: NavigateClickEvent) {
+      const selectedRecords: any[] = this.$refs.grid1.ej2Instances.getSelectedRecords();
+      const docID: string = selectedRecords[0].documentId;
+      const documentName = selectedRecords[0].messageTitle;
+      if (args.item.id === 'delete') {
+        this.$data.deleteDialogVisible = true;
+      } else if (args.item.id === 'download') {
+        this.$nuxt.$documentAction.downloadDocument({ docID: docID }, documentName);
+      } else if (args.item.id === 'share') {
+        this.getSharedTemplateDetails();
+      }
+    }
+
+    clearSelection () {
+      this.gridClearSelection();
+    }
+
+    mergeTemplate (mergeOption: string) {
+      if (this.templateIds.length >= 1) {
+        const userInfoResponse = this.$nuxt.$store.state.userInfoResponse;
+        if (mergeOption === 'bulklink' && userInfoResponse && !userInfoResponse.canAllowBulkLinks) {
+          const isAdmin = userInfoResponse.roleId === '1';
+          if (isAdmin) {
+            this.$nuxt.$emit('openUpgradePlan', this.$t('common.upgradePlanDesc', { pageName: 'bulk links' }), true);
+          } else {
+            this.$nuxt.$emit('openUpgradePlan', this.$t('common.upgradePlanMemberDesc', { pageName: 'bulk links' }), true, true);
+          }
+          return;
+        }
+        this.$nuxt.$spinner.show(true);
+        this.$nuxt.$api.template.mergeTemplate({
+          data: { templateIds: this.templateIds, documentId: '', isCreateLink: mergeOption === 'bulklink', isTemplateMerge: mergeOption === 'template-merge' },
+          query: {}
+        }).then(data => {
+          this.gridClearSelection();
+          this.templateIds = [];
+          if (!data.isPolicyFailed) {
+            this.templateTracker(AnalyticsAction.MergeTemplateAction, UserInsightAction.MergeTemplateAction);
+            if (mergeOption === 'document') {
+              window.location.href = `/document/new?documentId=${data.id}&isMergeTemplate=true&signbuilderType=signing`;
+            } else if (mergeOption === 'bulklink') {
+              window.location.href = `/document/new/?bulk-link=true&documentId=${data.id}&isMergeTemplate=true&signbuilderType=createlink`;
+            } else {
+              window.location.href = `/document/new?template=true&documentId=${data.id}&isMergeTemplate=true&signbuilderType=createtemplate`;
+            }
+          } else if (data.isPolicyFailed) {
+            const errorMessage = data.errorMessage ? data.errorMessage : this.$nuxt.$t('templates.mergeFailed');
+            this.$nuxt.$toastService.show(errorMessage, 'bs_toast_failure', 'bs_failure_icon');
+            this.$nuxt.$spinner.show(false);
+          }
+        })
+          .catch(error => {
+            this.gridClearSelection();
+            this.templateIds = [];
+            let errorMessage = this.$nuxt.$t('templates.mergeFailed');
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+              errorMessage = error.response.data.errorMessage;
+            }
+            this.$nuxt.$toastService.show(errorMessage, 'bs_toast_failure', 'bs_failure_icon');
+            this.$nuxt.$spinner.show(false);
+          });
+      }
+    }
+
+    gridClearSelection () {
+      this.templateIds = [];
+      this.$nuxt.$store.commit('template/setIsMultipleTemplateSelected', false);
+      this.checkState = true;
+      this.selectedDocumentsCount = 0;
+      if (this.$refs.grid1) {
+        this.$refs.grid1.clearSelection();
+        this.showMenuIcons();
+      }
+      this.$nuxt.$userInsight.track(
+        AnalyticsAction.ClearSelection,
+        new UserInsight({
+          Action: UserInsightAction.ClearSelectionAction,
+          Origin: UserInsightOrigin.ClearSelectionButton,
+          Page: this.$nuxt.$userInsight.getPage(),
+        }),
+      );
+    }
+
+    GridLoad () {
+      this.$refs.grid1.ej2Instances.showSpinner = function () {};
+    }
+
+    ToolbarClick (args: NavigateClickEvent) {
+      if (args.item.text === 'Share') {
+        // this.showUserComponent = true;
+        this.getSharedTemplateDetails();
+      }
+    }
+
+    gridActionBegin (args: any) {
+      const $this = this as any;
+      if (args.requestType === 'paging' || args.requestType === 'sorting') {
+        if (args.requestType === 'paging') {
+          replacePageQuery(this.$nuxt, args.currentPage.toString());
+        }
+        this.toggleFilterLoading(true);
+      }
+    }
+
+    gridActionComplete () {
+      this.selectedDocumentsCount = this.$refs.grid1.getSelectedRecords().length;
+      if (this.selectedDocumentsCount === 0) {
+        this.templateIds = [];
+      }
+      this.$nuxt.$store.commit('template/setIsMultipleTemplateSelected', this.selectedDocumentsCount > 1);
+      if (this.selectedDocumentsCount > 1) {
+        this.hideMenuIcons();
+      }
+    }
+
+    GridDataBound () {
+      for (
+        let i = 1;
+        i < this.$refs.grid1.ej2Instances.getHeaderTable().querySelectorAll('.e-headercell').length;
+        i++
+      ) {
+        const headerText = i - 1;
+        if (
+          this.$refs.grid1.ej2Instances.getHeaderTable().querySelectorAll('.e-headertext')[headerText]
+        ) {
+          const margin =
+                    (<HTMLElement>(
+                        this.$refs.grid1.ej2Instances.getHeaderTable().querySelectorAll('.e-headercell')[i]
+                    )).offsetWidth -
+                    (42 +
+                        this.$refs.grid1.ej2Instances.getHeaderTable().querySelectorAll('.e-headertext')[
+                          headerText
+                        ].offsetWidth);
+          (<HTMLElement>(
+                    this.$refs.grid1.ej2Instances.getHeaderTable().querySelectorAll('.e-sortfilterdiv')[i]
+                )).style.marginRight = margin + 'px';
+        }
+      }
+      this.$nuxt.$spinner.show(false);
+      if (!this.$refs.grid1.ej2Instances.currentViewData.length) {
+        if (!this.isSearch && !this.isFilter) {
+          removeClass(selectAll('#search_templates_bar'), 'bs_enabled');
+          addClass(selectAll('#search_templates_bar'), 'bs_disbaled');
+        }
+        (select('#empty-docs') as EJ2Intance).style.display = '';
+        (select('#show-grid') as EJ2Intance).style.display = 'none';
+      } else {
+        removeClass(selectAll('#search_templates_bar'), 'bs_disbaled');
+        addClass(selectAll('#search_templates_bar'), 'bs_enabled');
+        (select('#show-grid') as EJ2Intance).style.display = '';
+        (select('#empty-docs') as EJ2Intance).style.display = 'none';
+      }
+      this.$refs.loadingElement.style.display = 'none';
+      this.$refs.filterLoadingElement.style.display = 'none';
+      this.$refs.grid1.ej2Instances.pagerModule.refresh();
+      const pagerObj = this.$refs.grid1.ej2Instances.pagerModule.pagerObj;
+      const pageInfo =
+            (pagerObj.currentPage === 1 ? pagerObj.currentPage : (pagerObj.currentPage - 1) * 20 + 1) +
+            ' - ' +
+            (pagerObj.currentPage === 1
+              ? this.$refs.grid1.ej2Instances.currentViewData.length
+              : (pagerObj.currentPage - 1) * 20 + this.$refs.grid1.ej2Instances.currentViewData.length) +
+            ' of ' +
+            pagerObj.totalRecordsCount;
+      this.$nuxt.$store.commit('setPageInfo', pageInfo);
+      if (this.isSearch) {
+        this.$nuxt.$store.commit('setSearchCount', pagerObj.totalRecordsCount);
+      } else {
+        this.$nuxt.$store.commit('setSearchCount', null);
+      }
+      if (isStatusMatch(this.$nuxt.$route, ['all', 'mytemplates', 'sharedtemplate'])) {
+        const headerCheckBoxWrapper = ((this.$refs.grid1.getHeaderContent() as unknown) as HTMLElement).getElementsByClassName(
+          'e-checkbox-wrapper',
+        )[0];
+        if (headerCheckBoxWrapper) {
+          headerCheckBoxWrapper.classList.add('bs-hide');
+        }
+      }
+    }
+
+    toggleFilterLoading (show: boolean) {
+      this.$refs.filterLoadingElement.style.display = show ? 'block' : 'none';
+    }
+
+    GridrowDeselected (args: any) {
+      if (args && args.data) {
+        const headerCheckBoxWrapper = ((this.$refs.grid1.getHeaderContent() as unknown) as HTMLElement).getElementsByClassName(
+          'e-checkbox-wrapper',
+        )[0];
+        const selectRecords = this.$refs.grid1.getSelectedRecords();
+        const index = this.templateIds.indexOf(args.data.documentId);
+        if (index !== -1) {
+          this.templateIds.splice(index, 1);
+        }
+        const length = selectRecords.length;
+        this.selectedDocumentsCount = length;
+        this.isGridMultipleItemsSelected = length > 1;
+        this.$nuxt.$store.commit('template/setIsMultipleTemplateSelected', this.isGridMultipleItemsSelected);
+        this.checkState = !length;
+        this.updateSelectionHeaderMessage(selectRecords);
+
+        if (this.selectedDocumentsCount < 1 && headerCheckBoxWrapper) {
+          headerCheckBoxWrapper.classList.remove('bs-show');
+        }
+      }
+    }
+
+    gridActionFailure (args) {
+      loginPageRedirection(args);
+    }
+
+    GridrowSelected (args: any) {
+      if (args && args.target != null) {
+        this.openContextMenu(args.target as HTMLElement, args.data as any);
+        const headerCheckBoxWrapper = ((this.$refs.grid1.getHeaderContent() as unknown) as HTMLElement).getElementsByClassName(
+          'e-checkbox-wrapper',
+        )[0];
+        const selectRecords = this.$refs.grid1.getSelectedRecords();
+        const length = selectRecords.length;
+        this.selectedDocumentsCount = length;
+        this.isShare = this.isDelete = this.isDownload = this.isMerge = false;
+        this.templateIds.push(this.uId);
+        this.isGridMultipleItemsSelected = length > 1;
+        this.$nuxt.$store.commit('template/setIsMultipleTemplateSelected', this.isGridMultipleItemsSelected);
+        if (length) {
+          this.checkState = false;
+          if (isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+            headerCheckBoxWrapper.classList.add('bs-show');
+            this.isDelete = true;
+          }
+          if (!isStatusMatch(this.$nuxt.$route, ['drafts'])) {
+            this.isMerge = true;
+          }
+          if (length === 1) {
+            this.isToolbar = true;
+            this.isDownload = true;
+            if (
+              (selectRecords[0] as any).accessType === 'Edit' &&
+              (selectRecords[0] as any).status === 'Completed'
+            ) {
+              this.isShare = true;
+            }
+            if (
+              (selectRecords[0] as any).accessType === 'Edit' ||
+              (selectRecords[0] as any).senderUid === (selectRecords[0] as any).recipientUid
+            ) {
+              this.isDelete = true;
+            }
+            this.updateSelectionHeaderMessage(selectRecords);
+          } else if (length > 1) {
+            this.updateSelectionHeaderMessage(selectRecords);
+          }
+        }
+      }
+    }
+
+    updateSelectionHeaderMessage (selectRecords: any[]): void {
+      const message =
+            selectRecords.length > 1
+              ? this.$t('documents.templatesSelected')
+              : this.$t('documents.templateSelected');
+      this.headermessage = message + ` (${selectRecords.length})`;
+    }
+
+    checkBoxChange (args: CheckBoxChangeEventArgs) {
+      const selectedRowIndex = args.selectedRowIndexes as any;
+      const selectedRowCount = selectedRowIndex.length;
+      const selectedRecords = this.$refs.grid1.getSelectedRecords();
+      if (selectedRecords.length === 1) {
+        this.checkState = false;
+        this.isToolbar = true;
+        this.showMenuIcons();
+        this.updateSelectionHeaderMessage(selectedRecords);
+      } else if (selectedRecords.length > 1) {
+        this.hideMenuIcons();
+        this.updateSelectionHeaderMessage(selectedRecords);
+      } else {
+        this.templateIds = [];
+        this.showMenuIcons();
+        if (selectedRowCount) {
+          this.uId = this.$refs.grid1.ej2Instances.currentViewData[selectedRowIndex[0]].documentId;
+        }
+      }
+    }
+
+    showMenuIcons () {
+      this.menuIcons = document.querySelectorAll('.sb_template_menu-icon-input,.bs-edit,.bs-delete,.bs-use');
+      this.menuIcons.forEach((icon: HTMLElement) => {
+        icon.style.display = icon.classList.contains('sb_template_menu-icon-input') ? 'block' : 'flex';
+      });
+    }
+
+    hideMenuIcons () {
+      this.menuIcons = document.querySelectorAll('.sb_template_menu-icon-input,.bs-edit,.bs-delete,.bs-use');
+      this.menuIcons.forEach((icon: HTMLElement) => {
+        icon.style.display = 'none';
+      });
+    }
+
+    GridRowSelecting (args: any) {
+      if (args && args.target != null && args.target.offsetParent != null) {
+        const colIndex = args.target.offsetParent.getAttribute("aria-colindex");
+        if (colIndex && colIndex !== "0" && this.$refs.grid1.getSelectedRecords().length) {
+          this.gridClearSelection();
+        }
+        if (colIndex === "0") {
+          this.checkState = false;
+        }
+        this.uId = (args.data as any).documentId;
+      }
+      this.isToolbar = true;
+    }
+
+    async TemplateSelect (args: MenuEventArgs) {
+      let selectedDocument: any = this.$refs.grid1.ej2Instances.getRowInfo(
+        this.$nuxt.$store.state.template.gridElement,
+      );
+        // let selectedRecords: any[] = this.$refs.grid1.ej2Instances.getSelectedRecords();
+      if (selectedDocument && selectedDocument.rowData) {
+        selectedDocument = selectedDocument.rowData;
+        this.selectedTemplate = selectedDocument;
+        const docGrid = this.$refs.grid1.ej2Instances;
+        const toastObj = this.$nuxt.$store.state.toastObj;
+        const docID = selectedDocument.documentId;
+        const documentName = selectedDocument.messageTitle;
+        const orgId = selectedDocument.recipientOrgId;
+        const $this = this as any;
+        const oldLabel = selectedDocument.labels;
+        const label = selectedDocument.templateLabels.filter(x => x.organizationId === this.$nuxt.$store.state.userData.organization_id);
+        this.labels = oldLabel.length > 0
+          ? oldLabel
+          : label.map(args => {
+            return args.label
+          });
+        const options = {};
+        if (args.item.text === 'Use template') {
+          this.templateTracker(AnalyticsAction.UseTemplateAction, UserInsightAction.UseTemplateAction);
+          window.location.href = '/document/new/?usetemplate=' + docID + '&isUseTemplate=true';
+        } else if (args.item.text === 'Edit template') {
+          if (this.selectedTemplate.templateVersion === null) {
+            const successMessage = this.$nuxt.$t('toast.templateMigrationTitle');
+            this.$nuxt.$toastService.show(successMessage, 'bs_toast_success', 'bs_reminder_toast');
+            this.$nuxt.$spinner.show(true);
+            this.$nuxt.$api.migrateTemplateDetails(docID).then(data => {
+              this.editTemplate(docID);
+            }
+            ).catch(() => {
+              this.editTemplate(docID);
+              this.$nuxt.$spinner.show(false);
+            });
+          } else {
+            this.editTemplate(docID);
+          }
+        } else if (['Add tags', 'Manage tags'].includes(args.item.text)) {
+          const isAddingTags = args.item.text === 'Add tags';
+          const dialogHeader = isAddingTags ? 'Add Tags' : 'Manage Tags';
+          const labelsData = isAddingTags ? this.labels : [...this.labels];
+          $this.$nuxt.$store.commit('setLabels', labelsData);
+          $this.$nuxt.$store.commit('setDocumentId', docID);
+          this.$refs.bsAddManageTag.$data.renameDialogHeader = dialogHeader;
+          this.$refs.bsAddManageTag.$data.renameDialogVisible = true;
+        } else if (args.item.text === 'Bulk send') {
+          this.templateTracker(AnalyticsAction.BulkSendAction, UserInsightAction.BulkSendAction);
+          window.location.href = '/document/new/?bulksend=true&templateId=' + docID;
+        } else if (args.item.text === 'Share') {
+          this.templateTracker(
+            AnalyticsAction.ShareTemplateAction,
+            UserInsightAction.ShareTemplateAction,
+          );
+          // this.showUserComponent = true;
+          this.getSharedTemplateDetails(true);
+        } else if (args.item.text === 'Download document') {
+          this.templateTracker(
+            AnalyticsAction.DownloadTemplateAction,
+            UserInsightAction.DownloadTemplateAction,
+          );
+          this.$nuxt.$documentAction.downloadDocument({ docID: docID }, documentName);
+          this.gridClearSelection();
+        } else if (args.item.text === 'Delete') {
+          this.templateTracker(
+            AnalyticsAction.DeleteTemplateAction,
+            UserInsightAction.DeleteTemplateAction,
+          );
+          this.$data.deleteDialogVisible = true;
+        } else if (args.item.id === 'template-menu-copy') {
+          const isSuccess = copyToClipboard(docID);
+          if (isSuccess) {
+            this.$toastService.show(
+              this.$nuxt.$t('documents.templateIdCopied'),
+              'bs_toast_success',
+              'bs_completed_toast'
+            );
+            this.$nuxt.$userInsight.track(
+              AnalyticsAction.CopyTemplateId,
+              new UserInsight({
+                Action: UserInsightAction.CopyTemplateIdAction,
+                Origin: UserInsightOrigin.CopyTemplateIdIcon,
+                Page: this.$nuxt.$userInsight.getPage(),
+              }),
+            );
+          } else {
+            this.$toastService.show(
+              this.$nuxt.$t('documents.templateIdCopiedFailed'),
+              'bs_toast_failure',
+              'bs_failure_icon',
+            );
+          }
+        } else if (args.item.text === 'Clone template') {
+          this.cloneTemplateId = docID;
+          this.$refs.cloneTemplateConfirmDialog.$refs.cloneWithoutFieldsData.ej2Instances.checked = true;
+          this.$refs.cloneTemplateConfirmDialog.selectedCloneType = 'CloneWithoutFieldsData';
+          this.$refs.cloneTemplateConfirmDialog.cloneDialogVisible = true;
+        } else if (args.item.text === 'Create bulk link') {
+          this.mergeTemplate('bulklink');
+        } else if (args.item.text === 'Export') {
+          const waitingContent = this.$nuxt.$t('toast.templateExportShortly');
+          const failureContent = this.$nuxt.$t('branding.somethingWrong');
+          this.$nuxt.$toastService.show(waitingContent, 'bs_toast_success', 'bs_reminder_toast');
+          const templateId = selectedDocument.documentId;
+          this.$nuxt.$api.template.getExportTemplateDetails(templateId)
+            .then((res) => {
+              const file = new Blob([res], { type: "application/json" });
+              saveAs(file, `${templateId}.json`);
+            }).catch(() => {
+              this.$nuxt.$toastService.show(failureContent, 'bs_toast_failure', 'bs_delete_toast');
+            });
+        }
+      }
+    }
+
+    editTemplate (docID: string) {
+      this.templateTracker(
+        AnalyticsAction.EditTemplateAction,
+        UserInsightAction.EditTemplateAction,
+      );
+      window.location.href = '/document/new/?template=true&&documentId=' + docID + '&isEditTemplate=true';
+    }
+
+    cloneTemplate () {
+      this.templateTracker(
+        AnalyticsAction.CloneTemplateAction,
+        UserInsightAction.CloneTemplateAction,
+      );
+      const includeFieldData = this.$refs.cloneTemplateConfirmDialog.selectedCloneType === 'CloneWithFieldsData';
+      if (this.selectedTemplate.templateVersion === null) {
+        const successMessage = this.$nuxt.$t('toast.templateMigrationTitle');
+        this.$nuxt.$toastService.show(successMessage, 'bs_toast_success', 'bs_reminder_toast');
+        this.$nuxt.$api.migrateTemplateDetails(this.cloneTemplateId).then(data => {
+          this.$nuxt.$documentAction.cloneTemplate(this.cloneTemplateId, includeFieldData);
+        }
+        ).catch(() => {
+          this.$nuxt.$documentAction.cloneTemplate(this.cloneTemplateId, includeFieldData);
+        });
+      } else {
+        this.$nuxt.$documentAction.cloneTemplate(this.cloneTemplateId, includeFieldData);
+      }
+    }
+
+    getSharedTemplateDetails (isContextMenuSelect: boolean = false) {
+      this.$nuxt.$spinner.show(true);
+      const isOrganizationDetailsReady: boolean = false;
+      const isTemplateDetailsReady: boolean = false;
+      this.disableShareAction = true;
+      const docGrid = this.$refs.grid1.ej2Instances;
+      let selectedRecords: any = docGrid.getSelectedRecords();
+      if (isContextMenuSelect) {
+        const selectedDocument: any = this.$refs.grid1.ej2Instances.getRowInfo(
+          this.$nuxt.$store.state.template.gridElement,
+        );
+        selectedRecords = [selectedDocument.rowData];
+      }
+      const documentIdList = [];
+      for (const record of selectedRecords) {
+        documentIdList.push(record.documentId);
+      }
+      this.$nuxt.$api.template
+        .getSharedTemplateDetails(documentIdList[0])
+        .then(data => {
+          const sharedData = data.sharedGroups;
+          const availableGroups = data.remainingGroups;
+
+          this.availableGroups = availableGroups;
+          this.templateSharedDetails = sharedData.map(e => {
+            return { ...e.group, accessType: e.accessType, oldAccessType: e.accessType };
+          });
+
+          this.showUserComponent = true;
+          this.$nuxt.$spinner.show(false);
+        })
+        .catch(() => {
+          this.$nuxt.$spinner.show(false);
+        });
+    }
+
+    scheduleGridRefresh () {
+      clearTimeout(this.gridRefreshDebounce);
+      this.gridRefreshDebounce = setTimeout(() => {
+        this.$refs.grid1.refresh();
+        this.$refs.grid1.clearSelection();
+      }, 1000);
+    }
+
+    onNewNotificationReceived () {
+      this.$refs.grid1.refresh();
+    }
+
+    getMoreActionItems (data: IAccessRights, hideItems, showItems) {
+      let items = { hItems: [], sItems: [] };
+      const orgSpecificLabels = isNullOrUndefined(data.templateLabels) ? [] : data.templateLabels.filter(label => label.organizationId === this.$nuxt.$store.state.userData.organization_id);
+      const hasOrgSpecificLabels = orgSpecificLabels.length > 0;
+      const hasGeneralLabels = !isNullOrUndefined(data.labels) && data.labels.length > 0;
+      items = this.updateContextItems(items, !hasOrgSpecificLabels && !hasGeneralLabels && data.canEdit, 'template-menu-add-tags');
+      items = this.updateContextItems(items, (hasOrgSpecificLabels || hasGeneralLabels) && data.canEdit, 'template-menu-manage-tags');
+      return items;
+    }
+
+    updateContextItems (
+      data,
+      isAdd,
+      id,
+      checkSeperator = false,
+      isSeperator = false,
+      separatorId = '',
+      checkItems = true,
+    ) {
+      if (checkItems) {
+        isAdd ? data.sItems.push(id) : data.hItems.push(id);
+      }
+      if (checkSeperator) {
+        isSeperator ? data.sItems.push(separatorId) : data.hItems.push(separatorId);
+      }
+      return data;
+    }
+
+    openContextMenu (target: HTMLElement, data: IAccessRights) {
+      const hItems = [];
+      const sItems = [];
+      const { top, height, right } = target.getBoundingClientRect();
+      const commandDetails = this.getMoreActionItems(data, hItems, sItems);
+      if (commandDetails.hItems.length) {
+        this.$refs.contextMenu.hideItems(commandDetails.hItems as any, true);
+      }
+      if (commandDetails.sItems.length) {
+        this.$refs.contextMenu.showItems(commandDetails.sItems as any, true);
+      }
+    }
+
+    dialogOpen () {
+      setTimeout(() => {
+        if (
+          this.$refs.creatorDropdown &&
+          !isNullOrUndefined(this.$refs.creatorDropdown.ej2Instances.value) &&
+          this.$refs.creatorDropdown.ej2Instances.value.length
+        ) {
+          this.$refs.creatorDropdown.ej2Instances.updateDelimView();
+        }
+        if (
+          this.$refs.labelsDropdown &&
+          !isNullOrUndefined(this.$refs.labelsDropdown.ej2Instances.value) &&
+          this.$refs.labelsDropdown.ej2Instances.value.length
+        ) {
+          this.$refs.labelsDropdown.ej2Instances.updateDelimView();
+        }
+        this.$refs.Dialog.ej2Instances.getButtons()[0].element.style.display =
+          this.isFilterLabels ||
+          this.isFilterCreator ||
+          this.isFilterCreatedBetween
+            ? 'initial'
+            : 'none';
+      }, 0);
+    }
+
+    disableApplyFilterButton (val) {
+      if (this.$refs.Dialog.ej2Instances.getButtons()[0].element.style.display === 'none') {
+        this.$refs.Dialog.ej2Instances.getButtons()[0].element.style.display = val ? 'none' : 'initial';
+      }
+      this.$refs.Dialog.ej2Instances.getButtons()[1].disabled = val;
+    }
+
+    filterDialogClose () {
+      if (!this.isApplyFilter) {
+        this.$refs.labelsDropdown.ej2Instances.value = this.$nuxt.$store.state.labelFilterValue;
+        this.$refs.creatorDropdown.ej2Instances.value = this.$nuxt.$store.state.createdByFilterValue;
+        this.$refs.dateRangeCreated.ej2Instances.startDate = this.$nuxt.$store.state.dataRangeFilterValue.length
+          ? this.$nuxt.$store.state.dataRangeFilterValue[0]
+          : null;
+        this.$refs.dateRangeCreated.ej2Instances.endDate = this.$nuxt.$store.state.dataRangeFilterValue.length
+          ? this.$nuxt.$store.state.dataRangeFilterValue[1]
+          : null;
+        this.$refs.dateRangeCreated.ej2Instances.value = this.$nuxt.$store.state.dataRangeFilterValue.length
+          ? this.$nuxt.$store.state.dataRangeFilterValue
+          : null;
+        this.isFilter = this.$nuxt.$store.state.isFilter;
+        this.isDateRangeFilterValue = this.isCreatedByFilterValue = false;
+        this.disableApplyFilterButton(true);
+      }
+      this.$nuxt.$store.commit('setFilterDialogOpenState', false);
+      this.isApplyFilter = false;
+    }
+
+    filterResetClick (args) {
+      this.resetFilterDropDowns();
+    }
+
+    resetFilterDropDowns () {
+      this.$refs.creatorDropdown ? (this.$refs.creatorDropdown.ej2Instances.value = null) : '';
+      this.$refs.labelsDropdown ? (this.$refs.labelsDropdown.ej2Instances.value = null) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.startDate = null) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.endDate = null) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.value = null) : '';
+      this.selectedDateRangePreset = null;
+      this.$refs.Dialog.ej2Instances.getButtons()[0].element.style.display = 'none';
+      this.$refs.Dialog.ej2Instances.getButtons()[1].disabled = !this.$nuxt.$store.state.isFilter;
+      this.isResetPage = true;
+      this.clearDateRangeCustomDisplayText();
+      this.$nuxt.$userInsight.track(
+        AnalyticsAction.ResetAdvanceFilter,
+        new UserInsight({
+          Action: UserInsightAction.ResetAdvanceFilterAction,
+          Origin: UserInsightOrigin.ResetAdvanceFilterButton,
+          Page: this.$nuxt.$userInsight.getPage(),
+        }),
+      );
+    }
+
+    filterDialogClick () {
+      this.performFiltering(true);
+      this.scheduleGridRefresh();
+    }
+
+    performFiltering (isFilter = false) {
+      this.isApplyFilter = true;
+      this.isDateRangeFilterValue = this.isCreatedByFilterValue = this.isLabelsFilterValue = this.isTagsFilterValue = false;
+      this.disableApplyFilterButton(true);
+      this.$nuxt.$emit('documentClearSelection');
+      this.$nuxt.$spinner.show(true);
+      this.$data.FilterIconHide = true;
+      const filterDialog = this.$refs.Dialog.ej2Instances;
+      this.filterOperation(isFilter);
+      filterDialog.hide();
+      this.templateTracker(
+        AnalyticsAction.AdvanceFilterAction,
+        UserInsightAction.AdvanceFilterAction,
+        false,
+      );
+    }
+
+    filterOperation (isFilter = false) {
+      let query = this.getQueryStrings();
+      let isTagsFilterClear: boolean;
+      const tagsClick = this.$nuxt.$store.state.tags1;
+      this.$data.isFilter = this.$data.isTagsFilter = this.isFilterLabels = this.isFilterTags = this.$data.isFilterCreator = this.$data.isFilterCreatedBetween = false;
+      const creatorDropdown = this.$refs.creatorDropdown ? this.$refs.creatorDropdown.ej2Instances.value : [];
+      const labelDropdown = this.$refs.labelsDropdown ? this.$refs.labelsDropdown.ej2Instances.value : [];
+      const dateRangeCreated = this.$refs.dateRangeCreated ? this.$refs.dateRangeCreated.ej2Instances : [];
+      const isAdvancedFilter: any = this.$route.query.isAdvancedFilter;
+      if (
+        !isFilter &&
+        isAdvancedFilter !== 'true' &&
+        this.$route.query.filter !== 'all' &&
+        !isNullOrUndefined(this.$route.query.filter)
+      ) {
+        query['filter'] = this.$route.query.filter;
+        query = this.updateAdvancedFilterValues(query, { clickabletags: tagsClick }, 'isFilterTags');
+      } else {
+        query = this.updateAdvancedFilterValues(query, { createdBy: creatorDropdown }, 'isFilterCreator');
+        query = this.updateAdvancedFilterValues(query, { labels: labelDropdown }, 'isFilterLabels');
+        query = this.updateAdvancedFilterValues(query, { clickabletags: tagsClick }, 'isFilterTags');
+
+        if (dateRangeCreated.value && isArray(dateRangeCreated.value)) {
+          const dateRangeType = getDateRangePresetName(dateRangeCreated.value[0], dateRangeCreated.value[1]);
+          this.selectedDateRangePreset = dateRangeType;
+
+          query = this.updateAdvancedFilterValues(query, { dateRangeType }, 'isFilterCreatedBetween');
+
+          if (dateRangeType === DateRangeCustom && !isNullOrUndefined(dateRangeType)) {
+            query = this.updateAdvancedFilterValues(
+              query,
+              { dateRange: dateRangeCreated.value },
+              'isFilterCreatedBetween',
+            );
+          } else {
+            delete query['dateRange'];
+          }
+        } else {
+          delete query['dateRangeType'];
+          delete query['dateRange'];
+        }
+
+        this.$data.isFilter ? (query['isAdvancedFilter'] = 'true') : delete query['isAdvancedFilter'];
+        if (this.isFilter && isAdvancedFilter !== 'true') {
+          isTagsFilterClear = true;
+        }
+        if (isTagsFilterClear === true) {
+          this.$nuxt.$store.state.tags1.length >= 0 ? this.$nuxt.$store.state.tags1.splice(0, this.$nuxt.$store.state.tags1.length) : '';
+          delete query['clickabletags'];
+        }
+      }
+      this.formQueries(query, { searchText: this.$nuxt.$store.state.template.searchText });
+      this.$nuxt.$store.commit('setLabelFilterValue', labelDropdown);
+      this.$nuxt.$store.commit('setCreatedByFilterValue', creatorDropdown);
+      this.$nuxt.$store.commit('setDateRangeFilterValue', dateRangeCreated.value);
+      const docGrid = this.$refs.grid1.ej2Instances;
+      docGrid.query.params = [];
+      docGrid.query.addParams('ID', getParams(this.$route));
+      this.updateFilterQuery();
+      this.$nuxt.$store.commit('SET_FILTER', this.isFilter);
+      this.$nuxt.$store.commit('SET_TAGSFILTER', this.isTagsFilter);
+      if (docGrid.query.params.length > 0) {
+        if (this.$nuxt.$store.state.template.searchText !== '') {
+          this.isSearch = true;
+        }
+        docGrid.query.addParams('SearchKey', this.$nuxt.$store.state.template.searchText);
+      }
+      if (!isSameRoute(this.$nuxt, this.$nuxt.$route.path, query)) {
+        this.$nuxt.$router.push({
+          path: this.$nuxt.$route.path,
+          query: query,
+        })
+      } else {
+        this.$nuxt.$spinner.show(true);
+      }
+      if (this.isFilter) {
+        this.templateTracker(
+          AnalyticsAction.AdvanceFilterAction,
+          UserInsightAction.AdvanceFilterAction,
+          false,
+        );
+      }
+    }
+
+    updateAdvancedFilterValues (query, updatedQueryString, statusProp) {
+      const [key, value]: [string, any] = Object.entries(updatedQueryString)[0];
+      if (value && value.length) {
+        query = this.formQueries(query, updatedQueryString);
+        if (key !== "clickabletags") {
+          this.$data.isFilter = this.$data[statusProp] = true;
+        }
+      } else {
+        delete query[key];
+      }
+      return query;
+    }
+
+    formQueries (query, values) {
+      Object.entries(values).forEach(([key, value]:[string, any]) => {
+        if (typeof value === 'string' && value !== '') {
+          query[key] = value;
+        } else if (!isNullOrUndefined(value) && value.length) {
+          query[key] = ['type', 'documentId', 'searchText'].includes(key)
+            ? value
+            : value.join(',');
+        } else {
+          delete query[key];
+        }
+      });
+      return query;
+    }
+
+    getQueryStrings () {
+      const query = {};
+      if (!this.isEmptyObject(this.$nuxt.$route.query)) {
+        Object.assign(query, this.$nuxt.$route.query);
+      }
+      return query;
+    }
+
+    dialogNativeClick (args: Event) {
+      args.stopPropagation();
+    }
+
+    onLabelsFiltering (args) {
+      const proxy = this;
+      args.cancel = true;
+      this.$refs.labelsDropdown.showSpinner();
+      clearTimeout(this.labelRefreshDebounce);
+      this.labelRefreshDebounce = setTimeout(() => {
+        this.$nuxt.$api.template.getTags(args.text).then(x => {
+          this.$refs.labelsDropdown.hideSpinner();
+          args.cancel = false;
+          args.updateData(x.tags);
+          setTimeout(() => {
+            // get the list from popup element
+            const lists = proxy.$refs.labelsDropdown.ej2Instances.popupObj.element.querySelector('ul');
+            // pass the element, text, ignore case and filter type as argument to highlightSearch method.
+            highlightSearch(lists, args.text, true, 'Contains');
+          }, 0);
+        });
+      }, 500);
+    }
+
+    labelRemove (args: any) {
+      if (args.e.currentTarget.classList.contains('e-chips-close')) {
+        this.$refs.labelsDropdown.ej2Instances.hidePopup();
+      }
+    }
+
+    creatorRemove (args: any) {
+      if (args.e.currentTarget.classList.contains('e-chips-close')) {
+        this.$refs.creatorDropdown.ej2Instances.hidePopup();
+      }
+    }
+
+    labelsFilterChange (args) {
+      if (args.name === 'change' && !args.isInteracted) {
+        return;
+      }
+      this.isLabelsFilterValue =
+        JSON.stringify(this.$refs.labelsDropdown.ej2Instances.value) !==
+        JSON.stringify(this.$nuxt.$store.state.labelFilterValue);
+      this.updateButtonValue();
+    }
+
+    updateButtonValue () {
+      this.isDateRangeFilterValue ||
+      this.isLabelsFilterValue ||
+      this.isCreatedByFilterValue
+        ? this.disableApplyFilterButton(false)
+        : this.disableApplyFilterButton(true);
+    }
+
+    onLabelScroll () {}
+
+    updateFilterQuery () {
+      const docGrid = this.$refs.grid1.ej2Instances;
+      const dateRangeCreated = this.$refs.dateRangeCreated
+        ? this.$refs.dateRangeCreated.ej2Instances
+        : this.$refs.dateRangeCreated;
+      const labelDropdown = this.$refs.labelsDropdown
+        ? this.$refs.labelsDropdown.ej2Instances.value
+        : this.$refs.labelsDropdown;
+      const creatorDropdown = this.$refs.creatorDropdown
+        ? this.$refs.creatorDropdown.ej2Instances.value
+        : this.$refs.creatorDropdown;
+      const tagsClick = this.$nuxt.$store.state.tags1;
+      if (labelDropdown && labelDropdown.length) {
+        this.$data.isFilterLabels = true;
+        this.$data.isFilter = true;
+        docGrid.query.addParams('Labels', labelDropdown);
+      }
+      if (creatorDropdown && creatorDropdown.length) {
+        this.$data.isFilterCreator = true;
+        this.$data.isFilter = true;
+        docGrid.query.addParams('CreatedBy', creatorDropdown);
+      }
+      if (tagsClick && tagsClick.length) {
+        this.$data.isFilterTags = true;
+        this.$data.isFilter = true;
+        this.$data.isTagsFilter = false;
+        docGrid.query.addParams('ClickableLabels', tagsClick);
+      }
+      if (
+        dateRangeCreated &&
+        !isNullOrUndefined(dateRangeCreated.startDate) &&
+        !isNullOrUndefined(dateRangeCreated.endDate)
+      ) {
+        this.$data.isFilterCreatedBetween = true;
+        this.$data.isFilter = true;
+        const dateRangeType = getDateRangePresetName(dateRangeCreated.value[0], dateRangeCreated.value[1]);
+        this.selectedDateRangePreset = dateRangeType;
+
+        let dateRangeVal = getDateRangePreset(this.selectedDateRangePreset);
+        dateRangeVal = dateRangeVal || {
+          startDate: dateRangeCreated.startDate,
+          endDate: dateRangeCreated.endDate,
+        };
+        docGrid.query.addParams('StartDate', dateRangeVal.startDate);
+        docGrid.query.addParams('EndDate', this.getEndDate(dateRangeVal.endDate));
+        docGrid.query.addParams('dateRangeType', this.selectedDateRangePreset);
+      }
+    }
+
+    labelsMultiSelectOpen (args) {
+      if (!this.labelPopupElement) {
+        this.labelPopupElement = args.popup.element;
+        (this.labelPopupElement.querySelector('.e-content.e-dropdownbase') as HTMLElement).addEventListener(
+          'scroll',
+          this.onLabelScroll.bind(this),
+        );
+
+        this.labelFilterInputEl = this.labelPopupElement.querySelector('.e-input-filter.e-input');
+      }
+
+      // had to use this hackish set timeout fn to just lazily open multiselect!
+      if (!this.labelDataSource.length && !this.isLabelsEmpty) {
+        args.cancel = true;
+        setTimeout(() => {
+          this.$refs.labelsDropdown.showSpinner();
+        }, 100);
+
+        this.$nuxt.$api.template.getTags('').then(x => {
+          setTimeout(() => {
+            this.labelDataSource = x.tags;
+            this.isLabelsEmpty = this.labelDataSource.length === 0;
+            setTimeout(() => {
+              this.$refs.labelsDropdown.showPopup();
+              this.updateFilterDropdownsSearchBox();
+            }, 100);
+          }, 300);
+        });
+      }
+      this.updateFilterDropdownsSearchBox();
+    }
+
+    updateFilterDropdownsSearchBox () {
+      const creatorSearchElement: HTMLElement = this.creatorPopupElement
+        ? this.creatorPopupElement.firstElementChild
+        : null;
+      const labelSearchElement: HTMLElement = this.labelPopupElement
+        ? this.labelPopupElement.firstElementChild
+        : null;
+      if (creatorSearchElement) {
+        creatorSearchElement.style.display = this.creatorDataSource.length <= 7 ? 'none' : 'block';
+      }
+
+      if (labelSearchElement) {
+        labelSearchElement.style.display = this.labelDataSource.length <= 7 ? 'none' : 'block';
+      }
+    }
+
+    selectedTags () {
+      if (!isNullOrUndefined(this.$nuxt.$route.query['isAdvancedFilter'])) {
+        this.filterDialogClear();
+      }
+      if (this.pageTitle !== 'Draft Templates') {
+        this.filterDialogClick();
+      }
+    }
+
+    filterDialogClear () {
+      this.$nuxt.$store.commit('SET_FILTER', false);
+      this.resetDialogFilteringValue();
+      this.$nuxt.$spinner.show(true);
+      const filterDialog = this.$refs.Dialog.ej2Instances;
+      this.gridClearFilter();
+      filterDialog.hide();
+    }
+
+    resetDialogFilteringValue () {
+      this.$refs.creatorDropdown ? (this.$refs.creatorDropdown.ej2Instances.value = []) : '';
+      this.$refs.labelsDropdown ? (this.$refs.labelsDropdown.ej2Instances.value = []) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.value = new Date(null)) : '';
+      this.clearDateRangeCustomDisplayText();
+    }
+
+    gridClearFilter () {
+      const docGrid = this.$refs.grid1.ej2Instances;
+      docGrid.query.params = [];
+      docGrid.query.addParams('ID', getParams(this.$route));
+      this.isFilter = false;
+    }
+
+    deleteChip (args) {
+      const value = this.$refs.labelsDropdown.ej2Instances.value.filter(item => item !== args.text);
+      this.$refs.labelsDropdown.ej2Instances.value = !isNullOrUndefined(value) ? value : null;
+      this.$nuxt.$spinner.show(true);
+      this.filterOperation();
+      this.scheduleGridRefresh();
+    }
+
+    deleteTagChip (args) {
+      const value = this.$nuxt.$store.state.tags1.filter(item => item !== args.text);
+      this.$nuxt.$store.state.tags1 = !isNullOrUndefined(value) ? value : null;
+      this.$nuxt.$spinner.show(true);
+      this.filterOperation();
+      this.scheduleGridRefresh();
+    }
+
+    getDefaultValues (queryName) {
+      let defaultValue: any;
+      switch (queryName) {
+        case 'page':
+          defaultValue = '1';
+          break;
+        case 'labels':
+          defaultValue = [];
+          break;
+        case 'clickabletags':
+          defaultValue = [];
+          break;
+        case 'dateRange':
+          defaultValue = { startDate: null, endDate: null };
+          break;
+        case 'searchText':
+          defaultValue = '';
+          break;
+        default:
+          defaultValue = ['all'];
+          break;
+      }
+      return defaultValue;
+    }
+
+    gridClearFiltering (emitClearFilter = true) {
+      this.isClearFilter = true;
+      this.isFilter = false;
+      let canShow = true;
+      if (this.isSearch) {
+        canShow = false;
+        this.searchClear();
+      }
+      delete this.$nuxt.$route.query.page;
+      if (this.$nuxt.$route.query.filter) {
+        delete this.$nuxt.$route.query.filter;
+      }
+      this.$refs.creatorDropdown ? (this.$refs.creatorDropdown.ej2Instances.value = null) : '';
+      this.$refs.labelsDropdown ? (this.$refs.labelsDropdown.ej2Instances.value = null) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.startDate = null) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.endDate = null) : '';
+      this.$refs.dateRangeCreated ? (this.$refs.dateRangeCreated.ej2Instances.value = null) : '';
+      this.$refs.grid1 ? (this.$refs.grid1.ej2Instances.pageSettings.currentPage = 1) : '';
+      this.$nuxt.$store.commit('setCreatedByFilterValue', []);
+      this.$nuxt.$store.commit('setLabelFilterValue', []);
+      this.$nuxt.$store.commit('setDateRangeFilterValue', []);
+      this.$nuxt.$store.commit('setSelectedLabel', []);
+      this.$nuxt.$store.commit('SET_TAGSFILTER', false);
+      this.isDateRangeFilterValue = this.isCreatedByFilterValue = false;
+      this.selectedDateRangePreset = null;
+      this.$nuxt.$spinner.show(true);
+      this.filterOperation();
+      emitClearFilter && this.$nuxt.$emit(DOCUMENTS_CLEAR_FILTER);
+      this.isClearFilter = false;
+      this.clearDateRangeCustomDisplayText();
+      if (
+        this.$nuxt.$route.query.isAdvancedFilter === 'true' ||
+        (this.pageTitle !== 'Draft Templates' &&
+        this.$nuxt.$route.query.isAdvancedFilter !== 'true')
+      ) {
+        this.$nuxt.$router.push({
+          path: this.$nuxt.$route.path,
+          query: {},
+        });
+      }
+      this.$nuxt.$userInsight.track(
+        AnalyticsAction.ClearAdvanceFilterAction,
+        new UserInsight({
+          Action: UserInsightAction.ClearAdvanceFilterAction,
+          Origin: UserInsightOrigin.ClearAdvanceFilter,
+          Page: this.$nuxt.$userInsight.getPage(),
+          SubPage: UserInsightSubPage.AdvanceFilterTemplatePage,
+        }),
+      );
+      if (canShow) {
+        this.scheduleGridRefresh();
+      }
+    }
+
+    onCreatedByFiltering (args) {
+      const proxy = this;
+      setTimeout(() => {
+        // get the list from popup element
+        const lists = proxy.$refs.creatorDropdown.ej2Instances.popupObj.element.querySelector('ul');
+        // pass the element, text, ignore case and filter type as argument to highlightSearch method.
+        highlightSearch(lists, args.text, true, 'Contains');
+      }, 0);
+    }
+
+    createdByFilterChange (args) {
+      if (args.name === 'change' && !args.isInteracted) {
+        return;
+      }
+
+      this.creatorDataSource = this.updatedCreatorDatasource;
+      this.isCreatedByFilterValue =
+        JSON.stringify(this.$refs.creatorDropdown.ej2Instances.value) !==
+        JSON.stringify(this.$nuxt.$store.state.createdByFilterValue);
+      this.updateButtonValue();
+    }
+
+    onCreatorScroll () {}
+
+    creatorMultiSelectOpen (args) {
+      if (!this.creatorPopupElement) {
+        this.creatorPopupElement = args.popup.element;
+        (this.creatorPopupElement.querySelector('.e-content.e-dropdownbase') as HTMLElement).addEventListener(
+          'scroll',
+          this.onCreatorScroll.bind(this),
+        );
+
+        this.creatorFilterInputEl = this.creatorPopupElement.querySelector('.e-input-filter.e-input');
+      }
+
+      // had to use this hackish set timeout fn to just lazily open multiselect!
+      if (!this.creatorDataSource.length && !this.isCreatedByEmpty) {
+        args.cancel = true;
+        setTimeout(() => {
+          this.$refs.creatorDropdown.showSpinner();
+        }, 100);
+
+        this.$api.template.getCreatorName(this.pageTitle === 'Shared Templates').then(x => {
+          setTimeout(() => {
+            this.creatorDataSource = x.CreatedBy;
+            this.updatedCreatorDatasource = [...this.creatorDataSource];
+            this.isCreatedByEmpty = this.creatorDataSource.length === 0;
+            setTimeout(() => {
+              this.$refs.creatorDropdown.showPopup();
+              this.updateFilterDropdownsSearchBox();
+            }, 100);
+          }, 300);
+        });
+      }
+      this.updateFilterDropdownsSearchBox();
+    }
+
+    dateRangeChange (args) {
+      isInitialSelection = !args.value;
+    }
+
+    dateRangeClose (args) {
+      if (args.startDate != null && args.endDate != null) {
+        this.setDateRangeCustomDisplayText([args.startDate, args.endDate]);
+        this.isDateRangeFilterValue = true;
+        this.selectedDateRangePreset = getDateRangePresetName(args.startDate, args.endDate);
+
+        if (
+          this.$nuxt.$store.state.dataRangeFilterValue &&
+          this.$nuxt.$store.state.dataRangeFilterValue.length
+        ) {
+          this.isDateRangeFilterValue = !!(
+            JSON.stringify(args.startDate) !==
+            JSON.stringify(this.$nuxt.$store.state.dataRangeFilterValue[0]) ||
+            JSON.stringify(args.endDate) !== JSON.stringify(this.$nuxt.$store.state.dataRangeFilterValue[1])
+          );
+        }
+        this.updateButtonValue();
+      }
+    }
+
+    setDateRangeCustomDisplayText (args: Date[] = null) {
+      const dateInstance = this.$refs.dateRangeCreated.ej2Instances;
+      const value = args || dateInstance.value;
+      if (value) {
+        const presetName = getDateRangePresetDisplayName(value[0], value[1]);
+        this.dateRangeCustomDisplay.children[0].classList.remove('date-range-placeholder');
+        this.dateRangeCustomDisplay.children[0].textContent = presetName;
+
+        if (value[0] && value[1]) {
+          const dateStartText = this.moment(value[0]).format('MM/DD/YYYY');
+          const dateEndText = this.moment(value[1]).format('MM/DD/YYYY');
+          this.dateRangeCustomDisplay.children[1].textContent = `(${dateStartText} - ${dateEndText})`;
+        }
+      } else {
+        this.clearDateRangeCustomDisplayText();
+      }
+    }
+
+    clearDateRangeCustomDisplayText () {
+      if (this.dateRangeCustomDisplay && this.dateRangeCustomDisplay.children.length) {
+        this.dateRangeCustomDisplay.children[0].classList.add('date-range-placeholder');
+        this.dateRangeCustomDisplay.children[0].textContent = 'Select a date range';
+        this.dateRangeCustomDisplay.children[1].textContent = '';
+      }
+    }
+
+    dateRangeCleared () {
+      isCleared = true;
+      this.isDateRangeFilterValue = false;
+      this.clearDateRangeCustomDisplayText();
+      this.$refs.Dialog.ej2Instances.getButtons()[1].disabled = false;
+    }
+
+    dateRangeOpen (args) {
+      const activeElement: Element = args.popup.element
+        .querySelector('.e-presets')
+        .querySelector('.e-list-item.e-active');
+      if (activeElement && (isInitialSelection || isCleared)) {
+        args.popup.element.classList.remove('e-preset-wrapper');
+        const rangeContainer = args.popup.element.querySelector('.e-date-range-container');
+        if (rangeContainer) {
+          rangeContainer.style.display = 'none';
+        }
+        const footer = args.popup.element.querySelector('.e-footer');
+        if (footer) {
+          footer.style.display = 'none';
+        }
+      }
+
+      if (!this.$refs.dateRangeCreated.ej2Instances.value) {
+        activeElement.classList.remove('e-active');
+      }
+    }
+
+    dateFilterCreated (args) {
+      const displayContainer = document.createElement('div');
+      const presetElement = document.createElement('div');
+      const valueElement = document.createElement('div');
+
+      displayContainer.classList.add('date-range-value-container');
+      presetElement.classList.add('date-range-value-preset');
+      valueElement.classList.add('date-range-input-value');
+
+      displayContainer.append(presetElement);
+      displayContainer.append(valueElement);
+
+      const element = this.$refs.dateRangeCreated.ej2Instances.element as HTMLInputElement;
+      element.insertAdjacentElement('afterend', displayContainer);
+      this.dateRangeCustomDisplay = displayContainer;
+      this.setDateRangeCustomDisplayText();
+    }
+
+    getDateRangeValueFromQuery () {
+      const dateRangeTypeQuery = this.isQueryValue('dateRangeType');
+      const dateRangeQuery = this.isQueryValue('dateRange');
+      if (dateRangeQuery || dateRangeTypeQuery) {
+        const dateRangeTypeQueryValue = this.$route.query.dateRangeType;
+        const dateRangeVal =
+          dateRangeTypeQueryValue === DateRangeCustom
+            ? this.fetchQueryStringValue('dateRange')
+            : getDateRangePreset(dateRangeTypeQueryValue as string);
+
+        return dateRangeVal;
+      }
+
+      return {
+        startDate: new Date(null),
+        endDate: TodayRange.end,
+      };
+    }
+
+    getEndDate (endDate: any): any {
+      const timestamp = new Date(endDate).setHours(23, 59, 59, 59);
+      const eDate = new Date(timestamp); // Midnight today 00:00:00.000
+      return eDate;
+    }
+
+    searchTextForm (type, refName) {
+      let statusText = this.getSearchDefaultValues(type);
+      if (type === 'type') {
+        return statusText;
+      }
+      const obj =
+        type === 'dateRange' ? this.$refs[refName].ej2Instances : this.$refs[refName].ej2Instances.value;
+      if (type === 'dateRange') {
+        const x = this.$nuxt.$store.state.dateFormat;
+        statusText +=
+          formatDateWithoutTime(obj.startDate, this.$nuxt) +
+          ' - ' +
+          formatDateWithoutTime(obj.endDate, this.$nuxt);
+        return statusText;
+      }
+      if (isNullOrUndefined(obj)) {
+        return '';
+      }
+      statusText += obj.length === 1 ? obj[0] : obj.length + ' selected';
+      return statusText;
+    }
+
+    getSearchDefaultValues (queryName) {
+      let defaultValue: any = '';
+      switch (queryName) {
+        case 'dateRange':
+          defaultValue = 'Created between - ';
+          break;
+        case 'createdBy':
+          defaultValue = 'Created by - ';
+          break;
+        default:
+          defaultValue = '';
+          break;
+      }
+      return defaultValue;
+    }
+
+    closePinFilterDlg () {
+      this.pinFilterDlgVisible = this.isEmptyPinFilterName = false;
+    }
+
+    savePinFilter () {
+      if (this.pinFilterName) {
+        const successToastContent = this.pinFilterId
+          ? this.$nuxt.$t('toast.updatePinFilterSuccess')
+          : this.$nuxt.$t('toast.addPinFilterSuccess');
+        const failedToastContent = this.pinFilterId
+          ? this.$nuxt.$t('toast.updatePinFilterFailure')
+          : this.$nuxt.$t('toast.addPinFilterFailure');
+        this.$nuxt.$spinner.show(true);
+        this.pinFilterDlgVisible = this.isEmptyPinFilterName = false;
+        this.$nuxt.$userInsight.track(
+          AnalyticsAction.PinFilter,
+          new UserInsight({
+            Page: UserInsightPage.TemplateMainPage,
+            Action: UserInsightAction.PinFilterAction,
+            Origin: UserInsightOrigin.PinFilter,
+          }),
+        );
+        this.$api.template
+          .pinFilteredStatus({
+            data: {
+              pinFilterId: this.pinFilterId,
+              filterName: this.pinFilterName,
+              filterStatus: {
+                id: getParams(this.$route),
+                createdBy: this.fetchQueryStringValue('createdBy'),
+                statusFilter: [0],
+                startDate: this.fetchQueryStringValue('dateRange').startDate,
+                endDate: this.fetchQueryStringValue('dateRange').endDate,
+                dateRangeType: this.selectedDateRangePreset,
+                labels: this.fetchQueryStringValue('labels'),
+                clickabletags: this.fetchQueryStringValue('clickabletags'),
+                searchText: this.$nuxt.$store.state.template.searchText,
+              },
+            },
+            query: {},
+          })
+          .then(data => {
+            this.pinFilterId = data.filterId;
+            this.$nuxt.$spinner.show(false);
+            this.$nuxt.$toastService.show(successToastContent, 'bs_toast_success', 'bs_success_icon');
+          })
+          .catch(() => {
+            this.$nuxt.$spinner.show(false);
+            this.$nuxt.$toastService.show(failedToastContent, 'bs_toast_failure', 'bs_failure_icon');
+          });
+      } else {
+        this.isEmptyPinFilterName = true;
+      }
+    }
+
+    pinFilterDlgOpen () {
+      this.pinFilterDlgVisible = true;
+    }
+
+    searchClear () {
+      this.isSearch = false;
+      this.$nuxt.$store.commit('template/SET_UPDATEDSEARCHTEXT', '');
+      this.DocumentSearch({ type: 'clear' })
+      this.$nuxt.$userInsight.track(
+        AnalyticsAction.ClearSearchTemplate,
+        new UserInsight({
+          Action: UserInsightAction.ClearSearchTemplateAction,
+          Origin: UserInsightOrigin.ClearSearchTemplateButton,
+          Page: this.$nuxt.$userInsight.getPage(),
+          SubPage: this.$nuxt.$userInsight.getTemplateSubPage(),
+        }),
+      );
+    }
+}
+
+
+<template>
+  <div class="template-doc" id="template_doc" :class="{ 'bs-overlay-top': showUserComponent }">
+    <ejs-dialog
+      ref="modalDialog"
+      :isModal="true"
+      :buttons="deleteDialogButtons"
+      :visible="deleteDialogVisible"
+      :target="deleteDialogTarget"
+      width="450px"
+      cssClass="confirm-delete-template-dialog"
+    >
+      <div v-if="isGridMultipleItemsSelected">
+        <div class="flex items-start pb-4 pt-4 pl-3 pr-8">
+          <div class="warning-gradient-bg"></div>
+          <div class="text-content-style">
+            {{ $nuxt.$t('templates.confirmPermanentDeletes', { length: selectedDocumentsCount }) }}
+          </div>
+        </div>
+      </div>
+      <div v-else>
+        <div class="flex items-start pb-4 pt-4 pl-3 pr-8">
+          <div class="warning-gradient-bg"></div>
+          <div class="text-content-style">{{ $nuxt.$t('templates.confirmPermanentDelete') }}</div>
+        </div>
+      </div>
+    </ejs-dialog>
+    <ejs-contextmenu
+      ref="contextMenu"
+      id="templates_menu"
+      :select="TemplateSelect"
+      :items="menuItems"
+    ></ejs-contextmenu>
+    <add-manage-tag ref="bsAddManageTag" :temp="labels"> </add-manage-tag>
+    <CloneTemplateDialog ref="cloneTemplateConfirmDialog" @buttonClick="cloneTemplate" />
+    <ejs-toast
+      ref="toastRef"
+      id="toast_pos"
+      :position="toastPosition"
+      cssClass="toast-icon"
+      :target="toastTarget"
+      timeOut="0"
+      content="Your document will be download shortly"
+      icon="e-laura"
+    ></ejs-toast>
+    <div id="loading" ref="loadingElement" class="sb-content-overlay" style="display : block;top:-60px;">
+      <div
+        style="background-color: rgb(255, 255, 255);border: none;border-radius: 8px;bottom: 0px;width: calc(100% - 0px);top: 0px;display: block;right: 0px;"
+      >
+        <div class="l-grid__item l-profile-main" style="width: 100%;">
+          <div href="#" class="l-grid__link">
+            <div class="l-grid__preview">
+              <div class="l-grid__img">
+                <div style="width: 96%; margin: 8px 32px 0px;">
+                  <div
+                    class="placeholder"
+                    style="width: 66%;height: 40px;margin: 12px 12px 12px 0px;border-radius: 24px;background-color: #f8f8f8 !important;"
+                  ></div>
+                  <div
+                    class="placeholder"
+                    style="width: 142px;height: 40px;margin: 12px 24px 16px 27px;border-radius: 20px;background-color: rgb(248, 248, 248) !important;float: revert;"
+                  ></div>
+                </div>
+
+                <div style="width: 94%; margin: 4px 32px 10px; background: rgb(249, 249, 249); height: 32px;">
+                  <div
+                    class="img_placeholder placeholder"
+                    style="width: 17%; height: 20px; margin: 12px 5% 12px 0px; border-radius: 4px; background: none !important;"
+                  ></div>
+                  <div
+                    class="img_placeholder placeholder"
+                    style="width: 17%; height: 20px; margin: 12px 5% 12px 10%; border-radius: 4px; background: none !important;"
+                  ></div>
+                  <div
+                    class="img_placeholder placeholder"
+                    style="width: 17%; height: 20px; margin: 12px 5% 12px 10%; border-radius: 4px; background: none !important;"
+                  ></div>
+                </div>
+                <div style="height: 40px; margin-top: -2px;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 21%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 8.5%'
+                          : '12px 0px 3px 6%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 14%; height: 20px; margin: 12px 0px 3px 6%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 9%; height: 20px; margin: 12px 9% 3px 6%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 14%; height: 20px; margin: 12px 0px 3px -1%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.9;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 19%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 10.5%'
+                          : '12px 0px 3px 8%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18%; height: 20px; margin: 12px 0px 3px 8%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 7%; height: 20px; margin: 12px 11% 3px 2%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 13%; height: 20px; margin: 12px 0px 3px -1%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.8;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 21%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 8.5%'
+                          : '12px 0px 3px 6%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 15%; height: 20px; margin: 12px 0px 3px 6%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 6%; height: 20px; margin: 12px 11% 3px 5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 15%; height: 20px; margin: 12px 0px 3px 0%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.7;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 19%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 10.5%'
+                          : '12px 0px 3px 8%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18%; height: 20px; margin: 12px 0px 3px 8%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 10%; height: 20px; margin: 12px 11% 3px 2%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 13%; height: 20px; margin: 12px 0px 3px -4%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.6;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 20%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 9.5%'
+                          : '12px 0px 3px 7%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 16%; height: 20px; margin: 12px 0px 3px 7%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 7%; height: 20px; margin: 12px 11% 3px 4%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 14%; height: 20px; margin: 12px 0px 3px -1%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.5;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 18%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 11.5%'
+                          : '12px 0px 3px 9%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 19%; height: 20px; margin: 12px 0px 3px 9%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 6%; height: 20px; margin: 12px 11% 3px 1%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 15%; height: 20px; margin: 12px 0px 3px 0%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.4;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 19%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 10.5%'
+                          : '12px 0px 3px 8%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 17%; height: 20px; margin: 12px 0px 3px 8%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 8%; height: 20px; margin: 12px 11% 3px 3%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 14%; height: 20px; margin: 12px 0px 3px -2%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.3;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 22%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 7.5%'
+                          : '12px 0px 3px 5%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 16%; height: 20px; margin: 12px 0px 3px 5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 9%; height: 20px; margin: 12px 11% 3px 4%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 15%; height: 20px; margin: 12px 0px 3px -3%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+                <div style="height: 40px; opacity: 0.2;">
+                  <div style="width: 94%;">
+                    <div
+                      v-bind:style="{
+                        margin: '13px 12px 8px 43px',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18px; height: 18px; margin: 13px 12px 8px 43px; border-radius: 4px;"
+                    ></div>
+                    <div
+                      class="img_placeholder placeholder"
+                      style="width: 19%; height: 20px; margin: 12px 5% 3px -0.5%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-bind:style="{
+                        margin: isStatusMatch($nuxt.$route, ['drafts'])
+                          ? '12px 0px 3px 10.5%'
+                          : '12px 0px 3px 8%',
+                      }"
+                      class="img_placeholder placeholder"
+                      style="width: 18%; height: 20px; margin: 12px 0px 3px 8%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 6%; height: 20px; margin: 12px 11% 3px 2%; border-radius: 4px;"
+                    ></div>
+                    <div
+                      v-if="!isStatusMatch($nuxt.$route, ['drafts'])"
+                      class="img_placeholder placeholder"
+                      style="width: 17%; height: 20px; margin: 12px 0px 3px 0%; border-radius: 4px;"
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div ref="filterLoadingElement" class="filter-loading">
+      <div class="filter-loading-container">
+        <img src="../../static/svg/loader.svg" alt="Trulli" width="48" height="48" />
+      </div>
+    </div>
+    <div
+      v-if="isStatusMatch($nuxt.$route, ['deleted']) && checkState"
+      style="float: right;top: 0px;display: flex;width: calc(100% - 33px);flex-direction: row;padding: 29px 22px 14px 27px;"
+    >
+      <span class="bs-deleted-header">{{ $nuxt.$t('documents.deleteHeader') }}</span>
+      <span class="bs-change-settings" style="padding:8px 0 0 10px;cursor:pointer;">{{
+        $nuxt.$t('documents.changesettings')
+      }}</span>
+    </div>
+    <div class="bs-tooltip" id="doc_icon_tooltip">
+      <div id="bs_search_bar" v-if="canShowToolbar && selectedDocumentsCount > 1">
+      <span id="select-sign">
+        {{ headermessage }}
+        <span id="clear-selection" style="cursor: pointer;" @click="gridClearSelection">
+          {{ $nuxt.$t('documents.clearselection') }}
+        </span>
+      </span>
+      <span v-if="isToolbar">
+        <ejs-toolbar id="toolbar" height="28px" :clicked="moveBtnClick" class="toggle">
+          <e-items>
+            <e-item
+              id="delete"
+              v-if="isDelete"
+              text="Delete"
+              template="<button class='e-btn bs-select-btn bs-select-text' id='delete_btn'>Delete</button>"
+            ></e-item>
+            <e-item v-if="isMerge" :template="mergeOptionsTemplate" cssClass="merge-template-dropdown"></e-item>
+            <e-item type="Separator"></e-item>
+            <e-item
+              id="share"
+              v-if="isShare"
+              text="Share"
+              template="<button class='e-btn bs-select-btn bs-select-text' id='move_btn'>Share</button>"
+            ></e-item>
+            <e-item
+              id="download"
+              v-if="isDownload"
+              text="Download"
+              template="<button class='e-btn bs-select-btn bs-select-text' id='download_btn'>Download</button>"
+            ></e-item>
+          </e-items>
+        </ejs-toolbar>
+      </span>
+    </div>
+      <div
+        class="ts_filter_text"
+        style="padding: 20px 0 0 24px"
+        :style="[{ display: isFilter || isSearch ? 'flex' : 'none' }]"
+      >
+        <div>
+          <span v-if="isSearch" style="padding-left: 8px; padding-right: 4px">
+            {{
+              $nuxt.$t('documents.searchResults', {
+                searchText: '"' + this.$nuxt.$store.state.template.searchText + '"',
+              })
+            }}</span
+          >
+          <span
+            v-if="isSearch && isFilter && (isFilterCreatedBetween || isFilterCreator || isFilterLabels)"
+            class="vl"
+          ></span>
+          <span
+            class="ts_filter_text"
+            v-if="isFilter && (isFilterLabels || isFilterTags || isFilterCreatedBetween || isFilterCreator)"
+            style="padding-left: 8px; padding-right: 4px"
+          >
+            {{ $nuxt.$t('documents.filterApplied') }}
+          </span>
+
+          <span v-if="isFilterLabels && isLabels">
+            <ejs-chiplist
+              id="labels-filter"
+              ref="labelsfilter"
+              :chips="selectedLabels"
+              :enableDelete="true"
+              @delete="deleteChip"
+            >
+            </ejs-chiplist>
+          </span>
+          <span v-if="isFilterTags && isTags">
+            <ejs-chiplist
+              id="tags-filter"
+              ref="tagsfilter"
+              :chips="selectedClickableLabels"
+              :enableDelete="true"
+              @delete="deleteTagChip"
+            >
+              >
+            </ejs-chiplist>
+          </span>
+
+          <span v-if="isFilter && isFilterCreator && isFilterLabels" class="v2"></span>
+          <span
+            class="bs_filter_text"
+            v-if="
+              isFilter &&
+                isFilterCreator &&
+                (pageTitle === 'All Templates' || pageTitle === 'Shared Templates')
+            "
+          >
+            {{ searchTextForm('createdBy', 'creatorDropdown') }}
+          </span>
+
+          <span
+            v-if="isFilter && (isFilterLabels || isFilterCreator) && isFilterCreatedBetween"
+            class="v2"
+          ></span>
+          <span class="bs_filter_text" v-if="isFilter && isFilterCreatedBetween && !isTags">
+            {{ searchTextForm('dateRange', 'dateRangeCreated') }}
+          </span>
+          <span
+            v-if="isFilter && (isFilterLabels || isFilterTags || isFilterCreatedBetween || isFilterCreator)"
+            class="ts_fil_clear cursor-pointer"
+            @click="gridClearFiltering"
+          >
+            {{ $nuxt.$t('documents.clearFilter') }}
+          </span>
+
+          <span
+            style="border-left: 1px solid #b3bbc5; margin-left: 8px; padding-left: 6px"
+            v-if="
+              (pageTitle !== 'Draft Templates' && isSearch) ||
+                (isFilter && (isFilterCreator || isFilterLabels || isFilterCreatedBetween || isFilterTags))
+            "
+            class="bs_fil_clear cursor-pointer"
+            @click="pinFilterDlgOpen"
+          >
+            <ejs-tooltip id="pin_filter" ref="tooltip" :content="pinFilterToolTipContent" width="218px">
+              <span class="bs_pin_to_dashboard"></span>
+            </ejs-tooltip>
+          </span>
+        </div>
+      </div>
+      <div
+        id="empty-docs"
+        :style="'display: none;'"
+        class="flex flex-col w-xfull items-center justify-center"
+      >
+        <img src="../../static/svg/template-empty-new.svg" alt="Trulli" width="280" height="auto" />
+        <h1 class="document-head1">{{ $t('templates.emptyTemplates') }}</h1>
+      </div>
+      <div
+        @scroll.passive="handleScroll"
+        id="show-grid"
+        :class="{
+          'show-header-checkbox': !isStatusMatch(this.$nuxt.$route, ['all', 'mytemplates', 'sharedtemplate']),
+        }"
+        :style="'padding: 0px 32px 24px 32px;overflow-y:auto;margin-top: 20px'"
+      >
+        <ejs-grid
+          ref="grid1"
+          id="temp-grid"
+          :dataSource="data"
+          :query="gridQuery"
+          :pageSettings="pageSettings"
+          :load="GridLoad"
+          rowHeight="40"
+          :allowPaging="true"
+          :allowFiltering="true"
+          :allowSorting="true"
+          :selectionSettings="selectionOptions"
+          :dataBound="GridDataBound"
+          :actionBegin="gridActionBegin"
+          :rowDeselected="GridrowDeselected"
+          :rowSelecting="GridRowSelecting"
+          :pagerTemplate="pagerTemp"
+          :checkBoxChange="checkBoxChange"
+          :actionFailure="gridActionFailure"
+          :sortSettings="gridSortOptions"
+          :rowSelected="GridrowSelected"
+          :searchSettings="searchSettings"
+          :actionComplete="gridActionComplete"
+          class="grid-component-container"
+        >
+          <e-columns>
+            <e-column
+              type="checkbox"
+              width="40px"
+              :customAttributes="{ class: ['grid-cell-checkbox'], 'data-id': 'template-checkbox' }"
+            ></e-column>
+            <e-column
+              :template="tagsTemplate"
+              headerText="Title"
+              :allowSorting="false"
+              :width="isStatusMatch($nuxt.$route, ['drafts']) ? '35%' : '33%'"
+              :customAttributes="{ class: ['grid-text-medium'], 'data-id': 'template-title' }"
+              clipMode="EllipsisWithTooltip"
+            ></e-column>
+            <e-column
+              :visible="!isStatusMatch($nuxt.$route, ['drafts']) ? true : false"
+              field="senderDetail.name"
+              headerText="Created By"
+              :allowSorting="false"
+              width="20%"
+              :customAttributes="{ class: 'grid-text-regular', 'data-id': 'template-createdby' }"
+              clipMode="EllipsisWithTooltip"
+            ></e-column>
+            <e-column
+              :template="rolesTemplate"
+              headerText="Roles"
+              :customAttributes="{ class: 'grid-text-medium' }"
+              :visible="!isStatusMatch($nuxt.$route, ['drafts']) ? true : false"
+              :width="isStatusMatch($nuxt.$route, ['deleted']) ? '47%' : '20%'"
+              clipMode="EllipsisWithTooltip"
+            ></e-column>
+            <e-column
+              field="activityDate"
+              :visible="!isStatusMatch($nuxt.$route, ['deleted']) ? true : false"
+              :template="dateTemplate"
+              :headerText="getGridHeaderText()"
+              :width="!isStatusMatch($nuxt.$route, ['drafts', 'deleted']) ? '23%' : '62%'"
+              :customAttributes="{ class: 'grid-text-medium' }"
+              clipMode="EllipsisWithTooltip"
+            ></e-column>
+            <e-column field="documentId" :visible="false" :isPrimaryKey="true"></e-column>
+          </e-columns>
+        </ejs-grid>
+      </div>
+    </div>
+    <div id="empty-docs" v-bind:style="'display: none;'" class="record-docs">
+      <h1 class="document-head1">{{ $t('documents.emptyDocument') }}</h1>
+    </div>
+    <div id="empty-record" v-bind:style="'display: none;'" class="record-docs">
+      <h1 class="document-head">{{ $t('documents.emptyRecords') }}</h1>
+      <p class="document-para">{{ $t('documents.emptyDocumentParagraph') }}</p>
+      <ejs-button id="create-btn" cssClass="document-but">{{ $t('documents.createDocument') }}</ejs-button>
+    </div>
+    <portal to="root-dialog-portal" v-if="showUserComponent">
+      <template-share-dialog
+        :show.sync="showUserComponent"
+        :availableGroups.sync="availableGroups"
+        :templateSharedDetails.sync="templateSharedDetails"
+        :selectedTemplate="selectedTemplate"
+      />
+    </portal>
+    <ejs-dialog
+      id="dialog"
+      ref="Dialog"
+      :target="dialogTarget"
+      cssClass="bs-filterdialog"
+      :beforeOpen="dialogOpen"
+      :close="filterDialogClose"
+      :closeOnEscape="closeOnEscape"
+      :width="width"
+      z-index="1001"
+      :buttons="dialogButtons"
+      :visible="visible"
+      @click.native="dialogNativeClick"
+    >
+      <div
+        v-if="pageTitle === 'All Templates' || pageTitle === 'Shared Templates'"
+        class="bs-filterdialog bs-filterdialog_input_content"
+        style="padding: 0px 8px"
+      >
+        <div class="bs-filterdialog">
+          <p style="margin: 12px 0 12px 0" class="ts-filterdialog">
+            {{ $t('templates.createdBy') }}
+          </p>
+          <ejs-multiselect
+            ref="creatorDropdown"
+            id="creatordropdown"
+            cssClass="bs_multi_dropdown"
+            :filtering="onCreatedByFiltering"
+            showDropDownIcon="true"
+            filterBarPlaceholder="Search creator"
+            :dataSource="creatorDataSource"
+            placeholder="Select a creator"
+            mode="CheckBox"
+            filterType="contains"
+            popupHeight="260px"
+            :close="createdByFilterChange"
+            :change="createdByFilterChange"
+            :fields="creatorDropDownFields"
+            :open="creatorMultiSelectOpen"
+            :removed="creatorRemove"
+            showSelectAll="true"
+            selectAllText="All"
+            unSelectAllText="All"
+          ></ejs-multiselect>
+        </div>
+      </div>
+      <div class="bs-filterdialog bs-filterdialog_input_content" style="padding: 0px 8px">
+        <div>
+          <p style="margin: 12px 0 12px 0" class="ts-filterdialog">{{ $t('documents.tags') }}</p>
+          <ejs-multiselect
+            ref="labelsDropdown"
+            id="labelsdropdown"
+            popupHeight="260px"
+            cssClass="bs_multi_dropdown"
+            :filtering="onLabelsFiltering"
+            showDropDownIcon="true"
+            filterBarPlaceholder="Search tags"
+            :dataSource="labelDataSource"
+            placeholder="Select a tags"
+            mode="CheckBox"
+            filterType="contains"
+            :removed="labelRemove"
+            :close="labelsFilterChange"
+            :change="labelsFilterChange"
+            :open="labelsMultiSelectOpen"
+          ></ejs-multiselect>
+        </div>
+      </div>
+      <div class="bs-filterdialog bs-filterdialog_input_content" style="padding: 0px 8px">
+        <div class="bs-filterdialog">
+          <p style="margin: 12px 0 12px 0" class="ts-filterdialog">Created Between</p>
+          <ejs-daterangepicker
+            ref="dateRangeCreated"
+            placeholder="Select a date range"
+            cssClass="bs-filterdialog bs_multi_dropdown"
+            id="daterange-creator"
+            :width="dateRangeWidth"
+            :change="dateRangeChange"
+            :select="dateRangeClose"
+            :cleared="dateRangeCleared"
+            :open="dateRangeOpen"
+            :created="dateFilterCreated"
+          >
+            <e-presets>
+              <e-preset label="Today" :start="todayStartDate" :end="todayEndDate"></e-preset>
+              <e-preset label="Yesterday" :start="yesterdayStartDate" :end="yesterdayEndDate"></e-preset>
+              <e-preset label="This week" :start="thisWeekStartDate" :end="thisWeekEndDate"></e-preset>
+              <e-preset label="Last week" :start="lastWeekStartDate" :end="lastWeekEndDate"></e-preset>
+              <e-preset label="This month" :start="thisMonthStartDate" :end="thisMonthEndDate"></e-preset>
+              <e-preset label="Last month" :start="lastMonthStartDate" :end="lastMonthEndDate"></e-preset>
+              <e-preset label="This year" :start="thisYearStartDate" :end="thisYearEndDate"></e-preset>
+              <e-preset label="Last year" :start="lastYearStartDate" :end="lastYearEndDate"></e-preset>
+            </e-presets>
+          </ejs-daterangepicker>
+        </div>
+      </div>
+    </ejs-dialog>
+    <ejs-dialog
+      ref="pinFilterObj"
+      id="pin-filter-dlg"
+      :closeOnEscape="true"
+      width="420px"
+      isModal="true"
+      :header="pinFilterDialogHeader"
+      showCloseIcon="true"
+      :animationSettings="animationSettings"
+      :visible="pinFilterDlgVisible"
+      :target="confirmDialogTarget"
+      :buttons="pinFilterDlgBtn"
+      :close="closePinFilterDlg"
+    >
+      <div class="pin-filter-content">
+        <div class="pb-4">
+          {{ pinFilterDialogTitleDescription }}
+        </div>
+        <div>
+          <span class="pin-filter-label" style="display: block; padding-bottom: 8px">{{
+            $nuxt.$t('documents.pinFilterName')
+          }}</span>
+          <ejs-textbox
+            v-model="pinFilterName"
+            :placeholder="pinFilterPlaceholder"
+            :value="pinFilterName"
+          ></ejs-textbox>
+          <span
+            class="bs-validation-text"
+            v-bind:style="{ display: isEmptyPinFilterName ? 'block' : 'none' }"
+            >{{ $nuxt.$t('documents.requiredField') }}</span
+          >
+        </div>
+      </div>
+    </ejs-dialog>
+  </div>
+</template>
+<script src="./_.ts"></script>
